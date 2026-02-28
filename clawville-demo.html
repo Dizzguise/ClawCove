@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦞 Clawville — Standalone Demo</title>
+<!--
+  CLAWVILLE STANDALONE DEMO
+  ─────────────────────────
+  A self-contained OpenClaw agent world visualizer.
+  No server needed. Open in any modern browser.
+
+  Based on: "Generative Agents: Interactive Simulacra of Human Behavior"
+  Park et al., 2023 · arxiv:2304.03442
+
+  SCRIPTED SIMULATION MODE:
+  - 5 lobster agents with daily schedules
+  - BFS pathfinding between buildings
+  - Buildings = OpenClaw system components
+  - Memory stream, reflection, planning events
+  - Speech bubbles, activity logs, inspector panel
+-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+canvas{display:block;width:100%;height:100%}
+
+/* ── UI OVERLAY ── */
+#ui{position:fixed;inset:0;pointer-events:none}
+#topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 14px;background:rgba(0,6,18,0.94);
+  border-bottom:2px solid #0a3050;pointer-events:all;
+}
+#logo{font-family:'Press Start 2P',monospace;font-size:11px;color:#00e5ff;
+  text-shadow:0 0 12px rgba(0,229,255,0.8),0 0 24px rgba(0,229,255,0.3)}
+#sub{font-family:'Press Start 2P',monospace;font-size:6px;color:#0a4060;margin-top:3px}
+#clockel{font-family:'Press Start 2P',monospace;font-size:9px;color:#7ef7ff;
+  text-align:right;text-shadow:0 0 8px rgba(126,247,255,0.5);line-height:1.5}
+.spdbtn{font-family:'Press Start 2P',monospace;font-size:7px;
+  background:rgba(0,15,35,0.9);border:1px solid #0a3a5a;
+  color:#2a7a9a;padding:4px 8px;cursor:pointer;pointer-events:all;transition:all 0.1s}
+.spdbtn.active,.spdbtn:hover{background:#00e5ff;color:#000;border-color:#00e5ff;
+  box-shadow:0 0 8px rgba(0,229,255,0.5)}
+
+/* ── INSPECTOR PANEL ── */
+#infopanel{
+  position:fixed;right:0;top:46px;width:240px;
+  background:rgba(0,6,18,0.97);border-left:2px solid #0a3050;
+  height:calc(100% - 46px);padding:12px 10px;overflow-y:auto;
+  font-family:'Press Start 2P',monospace;pointer-events:all;display:none;
+}
+#infopanel.show{display:block}
+.ip-title{font-size:9px;color:#00e5ff;margin-bottom:10px;line-height:1.6}
+.ip-badge{display:inline-block;font-size:6px;padding:2px 6px;border:1px solid;
+  margin-bottom:8px;line-height:1.6;margin-right:4px}
+.ip-row{font-size:6px;color:#0a5070;margin-bottom:5px;line-height:1.8}
+.ip-row span{color:#7ef7ff}
+.ip-section{font-size:6px;color:#0a3050;margin:10px 0 5px;
+  border-bottom:1px solid #040e1e;padding-bottom:3px;letter-spacing:.05em}
+.ip-mem{font-size:6px;color:#00c090;line-height:2;margin-bottom:2px}
+.ip-plan{font-size:6px;color:#88aaff;line-height:2;margin-bottom:2px}
+.ip-event{font-size:6px;color:#ffcc44;line-height:2;margin-bottom:2px}
+#closebtn{font-family:'Press Start 2P',monospace;font-size:6px;
+  background:rgba(0,15,35,0.9);border:1px solid #0a3050;
+  color:#0a5070;padding:4px 8px;cursor:pointer;margin-bottom:10px;pointer-events:all}
+
+/* ── EVENT LOG ── */
+#eventlog{
+  position:fixed;left:8px;top:54px;width:230px;
+  background:rgba(0,6,18,0.88);border:1px solid #0a3050;
+  padding:8px;font-family:'Press Start 2P',monospace;
+  font-size:6px;pointer-events:none;max-height:200px;overflow:hidden;
+}
+#eventlog-title{color:#0a4060;margin-bottom:5px;font-size:6px;letter-spacing:.1em}
+.log-entry{color:#1a7050;line-height:1.9;margin-bottom:1px;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.log-entry.new{color:#00e5a0}
+.log-entry.warn{color:#ffd060}
+.log-entry.cron{color:#cc88ff}
+
+/* ── LEGEND ── */
+#legend{
+  position:fixed;left:8px;bottom:8px;
+  background:rgba(0,6,18,0.88);border:1px solid #0a3050;
+  padding:8px 10px;font-family:'Press Start 2P',monospace;
+  font-size:6px;color:#1a6a8a;pointer-events:none;
+}
+.lr{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.ld{width:8px;height:8px;flex-shrink:0;border-radius:1px}
+
+/* ── SPEECH BUBBLE ── */
+#speech{
+  position:fixed;display:none;
+  background:#000e1c;border:2px solid #00e5ff;
+  padding:8px 12px;font-family:'Press Start 2P',monospace;
+  font-size:7px;color:#7ef7ff;line-height:1.7;max-width:240px;
+  pointer-events:none;z-index:100;
+  box-shadow:0 0 20px rgba(0,229,255,0.35);
+}
+
+/* ── MINI MAP ── */
+#minimap{
+  position:fixed;right:8px;bottom:8px;
+  background:rgba(0,6,18,0.92);border:1px solid #0a3050;
+  pointer-events:none;
+}
+#minimap canvas{display:block}
+
+/* ── SCROLLBAR ── */
+#infopanel::-webkit-scrollbar{width:4px}
+#infopanel::-webkit-scrollbar-track{background:transparent}
+#infopanel::-webkit-scrollbar-thumb{background:#0a3050;border-radius:2px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="topbar">
+    <div>
+      <div id="logo">🦞 CLAWVILLE</div>
+      <div id="sub">STANDALONE DEMO · generative agents · arxiv:2304.03442</div>
+    </div>
+    <div style="display:flex;gap:5px;align-items:center">
+      <span style="font-family:'Press Start 2P',monospace;font-size:6px;color:#0a3050">SPEED:</span>
+      <button class="spdbtn" onclick="setSpeed(0.5)">½x</button>
+      <button class="spdbtn active" id="sb1" onclick="setSpeed(1)">1x</button>
+      <button class="spdbtn" onclick="setSpeed(2)">2x</button>
+      <button class="spdbtn" onclick="setSpeed(4)">4x</button>
+      <button class="spdbtn" onclick="setSpeed(8)" style="margin-left:4px">8x</button>
+      <button class="spdbtn" onclick="nextDay()" style="margin-left:8px;color:#ffd060;border-color:#4a3010">NEXT DAY</button>
+    </div>
+    <div id="clockel">09:00 AM<br><span style="font-size:6px;color:#0a3050">DAY 1 · SIM</span></div>
+  </div>
+
+  <div id="eventlog">
+    <div id="eventlog-title">◈ ACTIVITY LOG</div>
+    <div id="log-entries"></div>
+  </div>
+
+  <div id="infopanel">
+    <button id="closebtn" onclick="document.getElementById('infopanel').classList.remove('show')">✕ CLOSE</button>
+    <div id="ipc"></div>
+  </div>
+
+  <div id="legend">
+    <div style="color:#00e5ff;margin-bottom:6px;font-size:7px">CLAWVILLE RESIDENTS</div>
+    <div class="lr"><div class="ld" style="background:#ff6b35"></div>Molty — Main Agent</div>
+    <div class="lr"><div class="ld" style="background:#00e5a0"></div>Wally — WhatsApp</div>
+    <div class="lr"><div class="ld" style="background:#9b5fff"></div>Digby — Discord</div>
+    <div class="lr"><div class="ld" style="background:#ffd060"></div>Cleo — Cron Worker</div>
+    <div class="lr"><div class="ld" style="background:#7ef7ff"></div>Byte — Sub-agent</div>
+    <div style="margin-top:6px;color:#0a3050">drag · click · inspect</div>
+  </div>
+
+  <div id="minimap"><canvas id="mmcanvas" width="120" height="84"></canvas></div>
+</div>
+
+<canvas id="canvas"></canvas>
+<div id="speech"></div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLAWVILLE — STANDALONE DEMO
+// Self-contained. No dependencies. Open in browser.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var canvas = document.getElementById('canvas');
+var ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+var mmCanvas = document.getElementById('mmcanvas');
+var mmCtx = mmCanvas.getContext('2d');
+
+var W = 0, H = 0;
+var TILE = 16, MW = 80, MH = 56;
+var camX = 0, camY = 0;
+var simTime = 9 * 60;   // minutes from midnight
+var simDay = 1;
+var simSpeed = 1;
+var tick = 0;
+
+// ── RESIZE ────────────────────────────────────────────────────────────────────
+function resize() {
+  W = canvas.offsetWidth; H = canvas.offsetHeight;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener('resize', resize);
+
+// ── MAP ───────────────────────────────────────────────────────────────────────
+// 0=floor 1=path 2=trench 3=sand 4=coral 5=rock 6=seaweed 7=anemone 8=shell
+var map = [];
+for (var mi = 0; mi < MH; mi++) { map.push([]); for (var mj = 0; mj < MW; mj++) map[mi].push(0); }
+
+function st(x, y, v) { if (x >= 0 && x < MW && y >= 0 && y < MH) map[y][x] = v; }
+function fr(x, y, w, h, v) { for (var dy = 0; dy < h; dy++) for (var dx = 0; dx < w; dx++) st(x+dx, y+dy, v); }
+
+// Trench borders
+fr(0, 0, MW, 3, 2); fr(0, MH-3, MW, 3, 2);
+fr(0, 0, 3, MH, 2); fr(MW-3, 0, 3, MH, 2);
+
+// Main streets
+fr(4, 26, MW-8, 4, 1); fr(37, 4, 4, MH-8, 1);
+fr(4, 14, 17, 3, 1);   fr(4, 42, 21, 3, 1);
+fr(58, 14, 18, 3, 1);  fr(58, 40, 18, 3, 1);
+fr(14, 4, 3, 26, 1);   fr(57, 4, 3, 26, 1);
+fr(14, 30, 3, 14, 1);  fr(57, 30, 3, 14, 1);
+fr(32, 21, 14, 10, 1); // central plaza
+
+// Decorative trench
+fr(68, 34, 8, 18, 2);
+
+// Sand areas
+fr(20, 46, 14, 8, 3); fr(46, 4, 12, 9, 3);
+
+// Scattered floor variation (rocks)
+for (var yy = 3; yy < MH-3; yy++) {
+  for (var xx = 3; xx < MW-3; xx++) {
+    if (map[yy][xx] === 0) {
+      var h2 = Math.sin(xx*0.47+yy*0.73) * Math.cos(xx*0.31-yy*0.59);
+      if (h2 > 0.65 && (xx+yy) % 4 === 0) st(xx, yy, 5);
+    }
+  }
+}
+
+// Coral clusters
+[ [6,6],[8,8],[10,7],[12,10],[7,12],[10,13],
+  [22,6],[24,8],[26,7],[28,9],
+  [48,6],[50,7],[52,9],[54,8],
+  [65,6],[67,8],[69,7],[71,9],
+  [6,18],[8,20],[10,19],
+  [65,18],[67,20],[69,19],
+  [6,35],[8,37],[10,36],[7,39],
+  [22,36],[24,38],[26,37],
+  [48,37],[50,38],[52,36],
+  [65,35],[67,37],[69,36],
+  [6,48],[8,50],[10,49],
+  [24,50],[26,48],[28,51],
+  [48,50],[50,48],[52,51]
+].forEach(function(p) { st(p[0], p[1], 4); });
+
+// Seaweed
+[ [9,5],[11,9],[23,5],[27,11],[49,5],[53,10],[66,5],[70,10],
+  [7,22],[9,23],[66,22],[70,23],
+  [7,40],[9,41],[23,41],[49,41],[66,40],
+  [7,52],[25,53],[49,52]
+].forEach(function(p) { st(p[0], p[1], 6); });
+
+// Anemones
+[ [11,7],[25,9],[51,8],[68,8],
+  [8,21],[67,21],[8,39],[24,40],[51,40],[67,39]
+].forEach(function(p) { st(p[0], p[1], 7); });
+
+// Shells
+[ [15,16],[17,15],[20,48],[22,47],[50,47],[53,48],[62,15],[64,16] ]
+.forEach(function(p) { st(p[0], p[1], 8); });
+
+// ── BUILDINGS ─────────────────────────────────────────────────────────────────
+var BUILDINGS = [
+  { id:'gateway', name:'The Spire', label:'GATEWAY SPIRE',
+    x:35, y:19, w:8, h:10,
+    wall:'#041428', roof:'#021020', accent:'#00e5ff', type:'gateway',
+    desc:'The neural spire of Clawville. All WebSocket signals pulse through its bioluminescent core. Single WS control plane — ws://127.0.0.1:18789',
+    details:{ bind:'ws://127.0.0.1:18789', uptime:'14d 3h 22m', sessions:'5 active', mode:'launchd daemon', auth:'token' },
+    activities:['Processing RPC call...','Routing to session...','Broadcasting presence...','Health ping OK','Pruning idle session...','Syncing config...'] },
+
+  { id:'agent-main', name:"Molty's Grotto", label:"MOLTY'S GROTTO",
+    x:15, y:13, w:9, h:8,
+    wall:'#180a06', roof:'#0e0503', accent:'#ff6b35', type:'agent',
+    desc:"Main agent workspace. Molty plans daily actions, reflects on memories, and executes long-context tasks with claude-opus-4-6 at thinking:high.",
+    details:{ model:'claude-opus-4-6', thinking:'high', session:'main', tokens:'84k/200k', tools:'bash,browser,canvas,cron,sessions' },
+    activities:['Reviewing memory stream...','Planning next actions...','Running bash tool...','Reflecting on events...','Calling sessions_send...','Canvas A2UI push...'] },
+
+  { id:'agent-wa', name:"Wally's Reef", label:"WALLY'S REEF",
+    x:16, y:31, w:8, h:7,
+    wall:'#041a10', roof:'#021008', accent:'#00e5a0', type:'agent',
+    desc:'WhatsApp coral reef. Handles all Baileys channel traffic. Sandboxed in Docker for safety. Routes inbound messages to the Gateway session.',
+    details:{ model:'claude-sonnet-4-6', sandbox:'docker', channel:'WhatsApp/Baileys', dmPolicy:'pairing', groups:'allowlist' },
+    activities:['Receiving message...','Composing reply...','Routing to Gateway...','Checking allowlist...','Chunking long reply...','Sending typing indicator...'] },
+
+  { id:'agent-disc', name:"Digby's Cave", label:"DIGBY'S CAVE",
+    x:52, y:13, w:8, h:7,
+    wall:'#060418', roof:'#030210', accent:'#9b5fff', type:'agent',
+    desc:'Discord agent cave. Guild events echo through crystal walls. Handles slash commands, DM pairing, and group activation.',
+    details:{ model:'claude-haiku-4-5', guilds:'2', sandbox:'docker', dmPolicy:'pairing', commands:'native+text' },
+    activities:['Watching mentions...','Handling /status...','Syncing guild data...','Sending reply chunk...','DM pairing request...','Activation: mention mode'] },
+
+  { id:'db', name:'Memory Vault', label:'MEMORY VAULT',
+    x:42, y:31, w:9, h:8,
+    wall:'#181000', roof:'#0e0a00', accent:'#ffd060', type:'database',
+    desc:'Ancient sunken vault. Stores all session memories, the long-term memory stream, reflections, and pruning logs for every agent in Clawville.',
+    details:{ engine:'SQLite+JSON', sessions:'5', memories:'8,432 entries', reflections:'214', pruned:'1,203' },
+    activities:['Writing memory entry...','Pruning old context...','Indexing reflections...','Reading session state...','Compacting context...','Retrieving past events...'] },
+
+  { id:'cron', name:'Tide Clock', label:'TIDE CLOCK',
+    x:53, y:31, w:7, h:7,
+    wall:'#0e0418', roof:'#070010', accent:'#cc88ff', type:'cron',
+    desc:'Ancient tide-driven clock tower. Fires scheduled jobs: daily digest at 8am, health checks every 5min, Gmail Pub/Sub triggers, and webhooks.',
+    details:{ jobs:'4 active', next:'08:00 AM', healthCheck:'*/5 * * * *', webhook:'/webhook/trigger', gmailTopic:'pubsub enabled' },
+    activities:['Checking schedule...','Firing daily digest...','Running health check...','Gmail Pub/Sub poll...','Webhook received...','Waking agent...'] },
+
+  { id:'skills', name:'ClawHub Reef', label:'CLAWHUB REEF',
+    x:20, y:44, w:8, h:7,
+    wall:'#041810', roof:'#020e06', accent:'#00ff88', type:'skills',
+    desc:'Skills reef. Agents swim here to auto-install and run managed skills from the ClawHub registry at clawhub.com.',
+    details:{ registry:'clawhub.com', installed:'browse,images,location,gmail', managed:'12 available', workspace:'~/.openclaw/workspace/skills' },
+    activities:['Serving SKILL.md...','Auto-installing skill...','Checking skill version...','Registering workspace skill...','Loading AGENTS.md...','Skill search query...'] },
+
+  { id:'channels', name:'Signal Coral', label:'SIGNAL CORAL',
+    x:50, y:44, w:9, h:7,
+    wall:'#180408', roof:'#0e0205', accent:'#ff88cc', type:'channels',
+    desc:'Multi-channel coral formation. WhatsApp, Telegram, Discord, Slack, Signal, and WebChat all bloom from this coral hub.',
+    details:{ active:'6 channels', dmPolicy:'pairing', webhooks:'enabled', webchat:'gateway-embedded', matrix:'extension', zalo:'extension' },
+    activities:['WhatsApp message in...','Telegram update...','Discord event fired...','Slack message routed...','Signal message recv...','WebChat client conn...'] },
+
+  { id:'browser', name:'Lens Cave', label:'LENS CAVE',
+    x:6, y:44, w:8, h:7,
+    wall:'#041420', roof:'#020c14', accent:'#44aaff', type:'tool',
+    desc:'Dedicated Chrome/Chromium grotto. Agents use CDP control to browse, take snapshots, click elements, and extract data through crystal lenses.',
+    details:{ engine:'Chrome/Chromium+CDP', profiles:'1', tools:'browser_snapshot,browser_action', color:'#FF4500', status:'standby' },
+    activities:['Taking page snapshot...','Clicking element...','Navigating to URL...','Extracting text data...','Submitting form...','Screenshot captured...'] }
+];
+
+// Mark building floors as walkable, add door paths
+BUILDINGS.forEach(function(b) {
+  fr(b.x, b.y, b.w, b.h, 1);
+  var doorX = Math.floor(b.x + b.w / 2);
+  st(doorX, b.y + b.h, 1);
+  st(doorX, b.y + b.h + 1, 1);
+  st(doorX, b.y + b.h + 2, 1);
+});
+
+// ── PATHFINDING ───────────────────────────────────────────────────────────────
+function isWalkable(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= MW || ty >= MH) return false;
+  var t = map[ty][tx];
+  if (t === 2 || t === 5) return false;
+  for (var i = 0; i < BUILDINGS.length; i++) {
+    var b = BUILDINGS[i];
+    if (tx >= b.x && tx < b.x+b.w && ty >= b.y && ty < b.y+b.h) {
+      var dX = Math.floor(b.x + b.w / 2);
+      return (tx === dX && ty === b.y + b.h - 1);
+    }
+  }
+  return true;
+}
+
+function bfs(sx, sy, ex, ey) {
+  if (sx === ex && sy === ey) return [];
+  var q = [[sx, sy]], vis = {}, parent = {};
+  var startKey = sx+','+sy;
+  vis[startKey] = true; parent[startKey] = null;
+  var dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+  var limit = 0;
+  while (q.length && limit++ < 3000) {
+    var cur = q.shift(), cx = cur[0], cy = cur[1];
+    if (cx === ex && cy === ey) {
+      var path = [], k = ex+','+ey;
+      while (parent[k] !== null) {
+        var pts = k.split(',');
+        path.unshift([parseInt(pts[0]), parseInt(pts[1])]);
+        k = parent[k];
+      }
+      return path;
+    }
+    for (var d = 0; d < dirs.length; d++) {
+      var nx = cx+dirs[d][0], ny = cy+dirs[d][1], nk = nx+','+ny;
+      if (!vis[nk] && isWalkable(nx, ny)) {
+        vis[nk] = true; parent[nk] = cx+','+cy; q.push([nx, ny]);
+      }
+    }
+  }
+  return [[ex, ey]];
+}
+
+function getBEntry(b) { return [Math.floor(b.x + b.w/2), b.y + b.h]; }
+
+// ── SCRIPTED SIMULATION EVENTS ─────────────────────────────────────────────────
+// Each agent has a memory stream, reflections, and planning log that grow over time
+// These are used in the inspector and speech bubbles
+
+var SCRIPTED_EVENTS = [
+  // {time, agentId, action, speech, logText, logType}
+  { t:548,  id:'molty', action:'arrive', place:'agent-main', speech:'Good morning. Let me review my plans.', log:'Molty arrived at Grotto to start morning planning', type:'new' },
+  { t:563,  id:'molty', action:'memory', speech:'Memory: Gateway had 5 active sessions yesterday.', log:'Molty retrieved memory: 5 sessions yesterday', type:'new' },
+  { t:600,  id:'cleo',  action:'arrive', place:'cron', speech:'Time to fire the 10am health check!', log:'Cleo fired health check cron job', type:'cron' },
+  { t:610,  id:'wally', action:'arrive', place:'agent-wa', speech:'3 new WhatsApp messages...', log:'Wally processing 3 inbound WhatsApp msgs', type:'new' },
+  { t:620,  id:'byte',  action:'arrive', place:'browser', speech:'Browser warm-up complete.', log:'Byte: Chrome/CDP browser ready', type:'new' },
+  { t:650,  id:'molty', action:'goto',   place:'gateway', speech:'Checking Gateway status...', log:'Molty heading to Gateway Spire', type:'new' },
+  { t:680,  id:'digby', action:'arrive', place:'agent-disc', speech:'Discord guild #1 has 3 new mentions.', log:'Digby handling Discord mentions', type:'new' },
+  { t:700,  id:'cleo',  action:'goto',   place:'channels', speech:'Routing webhook trigger...', log:'Cleo delivering webhook payload to Signal Coral', type:'cron' },
+  { t:720,  id:'molty', action:'arrive', place:'gateway', speech:'All sessions healthy. 84k tokens used.', log:'Molty: Gateway health OK, 5 sessions active', type:'new' },
+  { t:740,  id:'wally', action:'goto',   place:'db', speech:'Writing conversation log...', log:'Wally writing WhatsApp log to Memory Vault', type:'new' },
+  { t:760,  id:'byte',  action:'goto',   place:'agent-main', speech:'Running bash task for Molty!', log:'Byte: bash tool execution started', type:'new' },
+  { t:780,  id:'molty', action:'goto',   place:'db', speech:'Time to review my memory stream...', log:'Molty heading to Memory Vault for review', type:'new' },
+  { t:800,  id:'cleo',  action:'arrive', place:'cron', speech:'Gmail Pub/Sub: 2 new emails!', log:'Cleo: Gmail Pub/Sub triggered - 2 new emails', type:'warn' },
+  { t:820,  id:'digby', action:'goto',   place:'gateway', speech:'Syncing Discord session...', log:'Digby syncing Discord session at Gateway', type:'new' },
+  { t:840,  id:'molty', action:'memory', speech:'Reflection: I should batch my tool calls.', log:'Molty reflection: batch tool usage more efficiently', type:'new' },
+  { t:860,  id:'wally', action:'arrive', place:'channels', speech:'Routing Telegram message...', log:'Wally: Telegram message routed via Signal Coral', type:'new' },
+  { t:900,  id:'byte',  action:'goto',   place:'skills', speech:'Loading new skill from ClawHub!', log:'Byte: auto-installing browse.md v1.4.2', type:'new' },
+  { t:920,  id:'cleo',  action:'goto',   place:'agent-wa', speech:'Daily digest time!', log:'Cleo: firing daily digest to WhatsApp', type:'cron' },
+  { t:960,  id:'molty', action:'goto',   place:'skills', speech:'Checking skill updates...', log:'Molty: checking ClawHub for skill updates', type:'new' },
+  { t:980,  id:'digby', action:'goto',   place:'db', speech:'Logging today\'s interactions.', log:'Digby: writing Discord interaction log', type:'new' },
+  { t:1000, id:'byte',  action:'arrive', place:'agent-main', speech:'Canvas A2UI render complete!', log:'Byte: Canvas pushed to macOS A2UI', type:'new' },
+  { t:1020, id:'wally', action:'goto',   place:'agent-wa', speech:'Time to handle group messages.', log:'Wally: processing group message queue', type:'new' },
+  { t:1040, id:'cleo',  action:'arrive', place:'cron', speech:'Preparing midnight jobs...', log:'Cleo: midnight job queue prepared', type:'cron' },
+  { t:1060, id:'molty', action:'memory', speech:'Planning for tomorrow: run browser task early.', log:'Molty plan: schedule browser task at 8am', type:'new' },
+  { t:1080, id:'digby', action:'arrive', place:'agent-disc', speech:'Evening guild sweep done.', log:'Digby: evening Discord guild sweep complete', type:'new' },
+  { t:1100, id:'molty', action:'goto',   place:'agent-main', speech:'Compacting session context...', log:'Molty: /compact - context summary written', type:'warn' },
+];
+
+// ── AGENT DEFINITIONS ─────────────────────────────────────────────────────────
+function makeAgent(o) {
+  return Object.assign({}, o, {
+    px: o.sx * TILE, py: o.sy * TILE,
+    path: [], state: 'idle', stateTimer: 0,
+    schedIdx: 0, currentBuilding: null,
+    facing: 'down', walkFrame: 0, walkTick: 0,
+    speechText: '', speechTimer: 0, tailWave: 0,
+    memoryStream: o.memories.slice(),
+    reflections: o.reflections ? o.reflections.slice() : [],
+    plans: o.plans ? o.plans.slice() : [],
+    processedEvents: {},
+  });
+}
+
+var AGENTS = [
+  makeAgent({ id:'molty', name:'Molty', role:'Main Agent',
+    color:'#ff6b35', colorDark:'#6a1500', colorLight:'#ff9a60', antennae:'#ff3a10',
+    sx:39, sy:24,
+    schedule:[
+      {t:540,p:'agent-main',a:'Morning planning'},{t:660,p:'gateway',a:'Gateway health check'},
+      {t:720,p:'db',a:'Memory review'},{t:810,p:'skills',a:'Skill sync'},
+      {t:870,p:'browser',a:'Browser automation'},{t:930,p:'agent-main',a:'Afternoon reflection'},
+      {t:1000,p:'gateway',a:'Session monitor'},{t:1060,p:'channels',a:'Channel audit'},
+      {t:1120,p:'db',a:'Context compact'}
+    ],
+    details:{ model:'claude-opus-4-6', thinking:'high', session:'main', tokens:'84k/200k', thinkLevel:'high' },
+    memories:['Arrived at Grotto 09:00','Gateway health OK at 09:40','Memory reviewed 10:00','Browser task ran 11:00'],
+    reflections:['I should batch tool calls for efficiency','Gateway sessions look stable','Memory pruning needed soon'],
+    plans:['Run browser task before 9am tomorrow','Review all channel logs weekly','Keep tokens under 150k per day'] }),
+
+  makeAgent({ id:'wally', name:'Wally', role:'WhatsApp Agent',
+    color:'#00e5a0', colorDark:'#005a38', colorLight:'#60ffcc', antennae:'#00b070',
+    sx:20, sy:34,
+    schedule:[
+      {t:540,p:'agent-wa',a:'Check inbox'},{t:600,p:'gateway',a:'Sync session'},
+      {t:680,p:'channels',a:'Channel check'},{t:740,p:'agent-wa',a:'Compose replies'},
+      {t:860,p:'db',a:'Write log'},{t:960,p:'agent-wa',a:'Handle groups'},
+      {t:1080,p:'channels',a:'Route overflow'}
+    ],
+    details:{ model:'claude-sonnet-4-6', sandbox:'docker', channel:'WhatsApp/Baileys', dmPolicy:'pairing' },
+    memories:['3 WhatsApp msgs at 9:10','Routed Telegram query 9:40','Wrote DB log 10:00','Group msg handled 11:20'],
+    reflections:['DM pairing is working well','Should pre-warm reply templates'],
+    plans:['Review allowlist tomorrow','Handle group messages before 9am'] }),
+
+  makeAgent({ id:'digby', name:'Digby', role:'Discord Agent',
+    color:'#9b5fff', colorDark:'#2a0060', colorLight:'#cc99ff', antennae:'#6611cc',
+    sx:56, sy:18,
+    schedule:[
+      {t:540,p:'agent-disc',a:'Guild check'},{t:630,p:'gateway',a:'Sync session'},
+      {t:720,p:'channels',a:'Monitor Discord'},{t:800,p:'agent-disc',a:'Handle slash cmds'},
+      {t:900,p:'db',a:'Log interactions'},{t:1000,p:'skills',a:'Load skills'},
+      {t:1080,p:'agent-disc',a:'Evening sweep'}
+    ],
+    details:{ model:'claude-haiku-4-5', guilds:'2', sandbox:'docker', dmPolicy:'pairing', nativeCommands:'enabled' },
+    memories:['Joined Guild #987654 at startup','Handled /status x3','Paired 2 new DMs','Evening sweep OK'],
+    reflections:['Haiku model is fast for Discord','Slash commands working reliably'],
+    plans:['Enable more native commands','Review guild member allowlists'] }),
+
+  makeAgent({ id:'cleo', name:'Cleo', role:'Cron Worker',
+    color:'#ffd060', colorDark:'#6a4400', colorLight:'#ffe898', antennae:'#ffaa00',
+    sx:57, sy:35,
+    schedule:[
+      {t:480,p:'cron',a:'Start job queue'},{t:540,p:'gateway',a:'Morning digest'},
+      {t:600,p:'agent-wa',a:'Trigger WA briefing'},{t:700,p:'cron',a:'Health check run'},
+      {t:780,p:'channels',a:'Webhook triggers'},{t:840,p:'cron',a:'Gmail Pub/Sub'},
+      {t:960,p:'gateway',a:'Evening health check'},{t:1080,p:'cron',a:'Midnight prep'}
+    ],
+    details:{ jobs:'4 active', dailyDigest:'0 8 * * *', healthCheck:'*/5 * * * *', service:'launchd' },
+    memories:['Daily digest fired 8:00','Health check OK x6','Gmail Pub/Sub: 2 emails','Webhook triggered 10:20'],
+    reflections:['All cron jobs running on schedule','Gmail Pub/Sub is reliable'],
+    plans:['Add weekly summary cron job','Monitor webhook latency'] }),
+
+  makeAgent({ id:'byte', name:'Byte', role:'Sub-agent',
+    color:'#7ef7ff', colorDark:'#004a60', colorLight:'#aafeff', antennae:'#00bbcc',
+    sx:10, sy:47,
+    schedule:[
+      {t:540,p:'browser',a:'Warm browser'},{t:620,p:'agent-main',a:'Bash execution'},
+      {t:720,p:'skills',a:'Load skills'},{t:800,p:'browser',a:'Web automation'},
+      {t:900,p:'db',a:'Cache warm-up'},{t:1000,p:'agent-main',a:'Canvas render'},
+      {t:1080,p:'browser',a:'Final snapshot'}
+    ],
+    details:{ tools:'bash,browser,canvas,voice', sandbox:'non-main-docker', canvas:'A2UI macOS' },
+    memories:['Browser started OK 9:00','Bash task completed 9:40','Canvas rendered 11:00','Snapshot saved 11:20'],
+    reflections:['CDP browsing is stable','Should cache skill modules'],
+    plans:['Pre-warm browser at startup','Batch canvas renders'] })
+];
+
+// ── EVENT LOG ─────────────────────────────────────────────────────────────────
+var logEntries = [];
+var MAX_LOG = 12;
+
+function addLog(text, type) {
+  logEntries.unshift({ text: text.slice(0, 38), type: type || 'new' });
+  if (logEntries.length > MAX_LOG) logEntries.pop();
+  renderLog();
+}
+
+function renderLog() {
+  var el = document.getElementById('log-entries');
+  el.innerHTML = logEntries.map(function(e, i) {
+    var cls = 'log-entry' + (i === 0 ? ' new' : '') + (e.type === 'warn' ? ' warn' : '') + (e.type === 'cron' ? ' cron' : '');
+    return '<div class="' + cls + '">' + (e.type==='cron'?'⏰ ':e.type==='warn'?'⚠ ':'▸ ') + e.text + '</div>';
+  }).join('');
+}
+
+// ── SCRIPTED EVENTS PROCESSOR ─────────────────────────────────────────────────
+function processScriptedEvents() {
+  SCRIPTED_EVENTS.forEach(function(ev) {
+    var key = 'day'+simDay+'_'+ev.t+'_'+ev.id;
+    if (simTime >= ev.t && !globalProcessed[key]) {
+      globalProcessed[key] = true;
+      var agent = null;
+      for (var i = 0; i < AGENTS.length; i++) { if (AGENTS[i].id === ev.id) { agent = AGENTS[i]; break; } }
+      if (!agent) return;
+
+      if (ev.speech) showSpeech(agent, ev.speech);
+      if (ev.log) addLog(ev.log, ev.type);
+
+      // Update agent memory stream dynamically
+      if (ev.action === 'memory' && ev.log) {
+        agent.memoryStream.unshift(ev.log);
+        if (agent.memoryStream.length > 8) agent.memoryStream.pop();
+      }
+
+      // Force navigate to place
+      if (ev.place && (ev.action === 'arrive' || ev.action === 'goto')) {
+        var bldg = null;
+        for (var j = 0; j < BUILDINGS.length; j++) { if (BUILDINGS[j].id === ev.place) { bldg = BUILDINGS[j]; break; } }
+        if (bldg) {
+          var entry = getBEntry(bldg);
+          var ax = Math.round(agent.px / TILE), ay = Math.round(agent.py / TILE);
+          if (Math.abs(ax - entry[0]) > 2 || Math.abs(ay - entry[1]) > 2) {
+            agent.path = bfs(ax, ay, entry[0], entry[1]);
+            agent.state = 'walking';
+          }
+        }
+      }
+    }
+  });
+}
+
+var globalProcessed = {};
+
+// ── AGENT AI ──────────────────────────────────────────────────────────────────
+function updateAgent(a) {
+  a.stateTimer++;
+  a.tailWave += 0.12 * simSpeed;
+
+  var sched = a.schedule[a.schedIdx % a.schedule.length];
+  if (sched && simTime >= sched.t) {
+    var bldg = null;
+    for (var i = 0; i < BUILDINGS.length; i++) { if (BUILDINGS[i].id === sched.p) { bldg = BUILDINGS[i]; break; } }
+    if (bldg) {
+      var entry = getBEntry(bldg), ex = entry[0], ey = entry[1];
+      var ax = Math.round(a.px / TILE), ay = Math.round(a.py / TILE);
+      var d = Math.abs(ax-ex) + Math.abs(ay-ey);
+      if (d > 2) {
+        if (a.path.length === 0) { a.path = bfs(ax, ay, ex, ey); a.state = 'walking'; }
+      } else {
+        if (a.state !== 'working') {
+          a.state = 'working'; a.currentBuilding = bldg; a.stateTimer = 0;
+        }
+        if (a.stateTimer > 180 / simSpeed) {
+          a.schedIdx = (a.schedIdx + 1) % a.schedule.length;
+          a.state = 'idle'; a.currentBuilding = null;
+        }
+      }
+    }
+  }
+
+  if (a.path.length > 0) {
+    var tp = a.path[0], tpx = tp[0]*TILE, tpy = tp[1]*TILE;
+    var ddx = tpx - a.px, ddy = tpy - a.py;
+    var dist = Math.sqrt(ddx*ddx + ddy*ddy);
+    var spd = 1.1 * simSpeed;
+    if (dist < spd + 0.5) {
+      a.px = tpx; a.py = tpy; a.path.shift();
+      if (a.path.length === 0) { a.state = 'working'; }
+    } else {
+      a.px += ddx/dist * spd; a.py += ddy/dist * spd;
+      if (Math.abs(ddx) > Math.abs(ddy)) a.facing = ddx > 0 ? 'right' : 'left';
+      else a.facing = ddy > 0 ? 'down' : 'up';
+      a.walkTick++;
+      if (a.walkTick % 8 === 0) a.walkFrame = (a.walkFrame+1) % 4;
+    }
+  }
+  if (a.speechTimer > 0) a.speechTimer -= simSpeed;
+}
+
+// ── SPEECH ────────────────────────────────────────────────────────────────────
+var activeSpeech = null;
+function showSpeech(agent, text) {
+  agent.speechText = text; agent.speechTimer = 180; activeSpeech = agent;
+}
+
+function updateSpeech() {
+  var el = document.getElementById('speech');
+  if (activeSpeech && activeSpeech.speechTimer > 0) {
+    var sx = activeSpeech.px - camX, sy = activeSpeech.py - camY - 36;
+    el.style.display = 'block';
+    el.style.left = Math.max(5, Math.min(W - 250, sx)) + 'px';
+    el.style.top = Math.max(54, sy) + 'px';
+    el.innerHTML = '<span style="color:' + activeSpeech.color + '">' + activeSpeech.name + '</span><br>' + activeSpeech.speechText;
+  } else {
+    el.style.display = 'none'; activeSpeech = null;
+  }
+}
+
+// Random chatter pool (simulation flavor)
+var chatPool = [
+  {id:'molty', s:'Reviewing memory stream...'},
+  {id:'molty', s:'Planning next task...'},
+  {id:'wally', s:'WhatsApp looks busy today.'},
+  {id:'wally', s:'Sending reply chunks...'},
+  {id:'digby', s:'Discord guild active!'},
+  {id:'digby', s:'Slash command incoming.'},
+  {id:'cleo',  s:'Next job in 5 minutes.'},
+  {id:'cleo',  s:'Health check passed!'},
+  {id:'byte',  s:'Browser snapshot saved.'},
+  {id:'byte',  s:'Bash task complete!'},
+];
+var chatCooldown = 0;
+function maybeChatter() {
+  chatCooldown--;
+  if (chatCooldown <= 0 && Math.random() < 0.006) {
+    chatCooldown = 350;
+    var pick = chatPool[Math.floor(Math.random() * chatPool.length)];
+    for (var i = 0; i < AGENTS.length; i++) {
+      if (AGENTS[i].id === pick.id) { showSpeech(AGENTS[i], pick.s); break; }
+    }
+  }
+}
+
+// ── TILE DRAWING ──────────────────────────────────────────────────────────────
+function drawTile(tx, ty) {
+  var sx = tx*TILE - camX, sy = ty*TILE - camY;
+  if (sx < -TILE || sx > W+TILE || sy < -TILE || sy > H+TILE) return;
+  var t = map[ty][tx], ev = (tx+ty)%2===0;
+
+  if (t === 0) {
+    ctx.fillStyle = ev ? '#041428' : '#061c34';
+    ctx.fillRect(sx, sy, TILE, TILE);
+    if ((tx*3+ty*7)%13 === 0) { ctx.fillStyle = '#030f20'; ctx.fillRect(sx+2, sy+2, 4, 4); }
+  } else if (t === 1) {
+    ctx.fillStyle = ev ? '#0d2a42' : '#122e48';
+    ctx.fillRect(sx, sy, TILE, TILE);
+    ctx.fillStyle = '#003355';
+    ctx.fillRect(sx+1, sy+1, 5, 5); ctx.fillRect(sx+9, sy+9, 4, 4);
+  } else if (t === 2) {
+    ctx.fillStyle = '#020c18'; ctx.fillRect(sx, sy, TILE, TILE);
+    ctx.fillStyle = 'rgba(0,15,50,0.6)'; ctx.fillRect(sx, sy, TILE, TILE);
+    if ((tx+ty)%8===0) { ctx.fillStyle='rgba(0,80,180,0.08)'; ctx.fillRect(sx+4,sy+4,8,8); }
+  } else if (t === 3) {
+    ctx.fillStyle = ev ? '#1a3a5a' : '#2a4a6a'; ctx.fillRect(sx, sy, TILE, TILE);
+    if ((tx*5+ty*3)%9===0) { ctx.fillStyle='#2a4a6a'; ctx.fillRect(sx+3,sy+10,6,2); }
+  } else if (t === 4) {
+    ctx.fillStyle='#041428'; ctx.fillRect(sx, sy, TILE, TILE);
+    var wv = Math.round(Math.sin(tick*0.04+tx*0.7)*1.5);
+    ctx.fillStyle='#8a1a30'; ctx.fillRect(sx+6,sy+11,4,5);
+    var cc=(tx+ty)%3===0?'#ff4a6a':(tx+ty)%3===1?'#ff6a3a':'#ff3a5a';
+    ctx.fillStyle=cc;
+    ctx.fillRect(sx+4,sy+5+wv,8,7); ctx.fillRect(sx+2,sy+7,5,5); ctx.fillRect(sx+9,sy+7,5,5);
+    ctx.fillStyle='#00e5ff'; ctx.fillRect(sx+5,sy+3+wv,3,2); ctx.fillRect(sx+3,sy+6,2,2); ctx.fillRect(sx+11,sy+6,2,2);
+  } else if (t === 5) {
+    ctx.fillStyle='#041428'; ctx.fillRect(sx, sy, TILE, TILE);
+    ctx.fillStyle='#0a1e30'; ctx.fillRect(sx+2,sy+6,12,7);
+    ctx.fillStyle='#142840'; ctx.fillRect(sx+3,sy+5,10,3);
+  } else if (t === 6) {
+    ctx.fillStyle='#041428'; ctx.fillRect(sx, sy, TILE, TILE);
+    var sw = Math.round(Math.sin(tick*0.05+tx*0.8)*2);
+    ctx.fillStyle='#008040'; ctx.fillRect(sx+7,sy+8,2,8);
+    ctx.fillStyle='#00a050'; ctx.fillRect(sx+5+sw,sy+4,4,6);
+    ctx.fillRect(sx+7+Math.round(sw*0.6),sy+1,4,5);
+    ctx.fillStyle='#00c060'; ctx.fillRect(sx+6+sw,sy+2,2,2);
+  } else if (t === 7) {
+    ctx.fillStyle='#041428'; ctx.fillRect(sx, sy, TILE, TILE);
+    var aw = Math.round(Math.sin(tick*0.06+tx*0.5));
+    ctx.fillStyle='#8a1a30'; ctx.fillRect(sx+6,sy+12,4,4);
+    for (var ii=0; ii<5; ii++) {
+      var ax2 = sx+3+ii*2+Math.round(Math.sin(tick*0.07+ii)*aw);
+      ctx.fillStyle = ii%2===0 ? '#cc44ff' : '#ee88ff';
+      ctx.fillRect(ax2, sy+4, 3, 9);
+    }
+  } else if (t === 8) {
+    ctx.fillStyle='#041428'; ctx.fillRect(sx, sy, TILE, TILE);
+    ctx.fillStyle='#a07848'; ctx.fillRect(sx+3,sy+8,10,6);
+    ctx.fillStyle='#d4a878'; ctx.fillRect(sx+4,sy+6,8,6);
+    ctx.fillStyle='#a07848'; ctx.fillRect(sx+5,sy+7,6,1); ctx.fillRect(sx+5,sy+9,6,1);
+    ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillRect(sx+5,sy+6,3,2);
+  }
+}
+
+// ── BUILDING DRAWING ──────────────────────────────────────────────────────────
+function drawBuilding(b) {
+  var sx = b.x*TILE-camX, sy = b.y*TILE-camY, bw = b.w*TILE, bh = b.h*TILE;
+  if (sx > W+20 || sx+bw < -20 || sy > H+20 || sy+bh < -20) return;
+  var isActive = AGENTS.some(function(a){ return a.currentBuilding && a.currentBuilding.id===b.id && a.state==='working'; });
+  var gp = Math.sin(tick*0.06)*0.5+0.5;
+  var ga = Math.round(20+gp*35).toString(16).padStart(2,'0');
+
+  // Shadow
+  ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(sx+5,sy+5,bw,bh);
+  // Outer
+  ctx.fillStyle=b.roof; ctx.fillRect(sx,sy,bw,bh);
+  // Walls
+  ctx.fillStyle=b.wall; ctx.fillRect(sx+1,sy+1,bw-2,bh-2);
+  // Roof band
+  ctx.fillStyle=b.roof; ctx.fillRect(sx,sy,bw,TILE*2);
+  // Ridge
+  ctx.fillStyle=b.accent; ctx.fillRect(sx+2,sy+1,bw-4,2);
+  // Active glow
+  if (isActive) { ctx.fillStyle=b.accent+ga; ctx.fillRect(sx+1,sy+1,bw-2,bh-2); }
+
+  // Windows / door
+  for (var row=2; row<b.h-1; row++) {
+    for (var col=0; col<b.w; col++) {
+      var wx=sx+col*TILE+2, wy=sy+row*TILE+3;
+      var isDoor = col===Math.floor(b.w/2) && row===b.h-2;
+      if (isDoor) {
+        ctx.fillStyle=b.accent; ctx.fillRect(wx+1,wy-1,TILE-6,TILE-2);
+        ctx.fillStyle=b.accent; ctx.fillRect(wx+2,wy-3,TILE-8,4);
+        if (isActive) { ctx.fillStyle=b.accent+'88'; ctx.fillRect(wx,wy-2,TILE-4,TILE); }
+        ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillRect(wx+TILE-9,wy+(TILE-2)/2,2,3);
+      } else if (col%2===0) {
+        var glowing = isActive && Math.sin(tick*0.1+col*1.3+row*0.7) > 0.3;
+        ctx.fillStyle='#020c18'; ctx.fillRect(wx+1,wy,8,7);
+        ctx.fillStyle = glowing ? b.accent : 'rgba(0,50,90,0.5)';
+        ctx.fillRect(wx+2,wy+1,6,5);
+        ctx.fillStyle=b.accent+'55';
+        ctx.fillRect(wx+1,wy,8,1); ctx.fillRect(wx+1,wy+6,8,1);
+        ctx.fillRect(wx+1,wy,1,7); ctx.fillRect(wx+8,wy,1,7);
+      }
+    }
+  }
+
+  // Base stripe + fins
+  ctx.fillStyle=b.accent; ctx.fillRect(sx,sy+bh-2,bw,2);
+  ctx.fillStyle=b.accent+'66';
+  ctx.fillRect(sx,sy+TILE*2,2,bh-TILE*2-2);
+  ctx.fillRect(sx+bw-2,sy+TILE*2,2,bh-TILE*2-2);
+
+  // Spire (gateway + cron)
+  if (b.id==='gateway' || b.id==='cron') {
+    var anH = b.id==='gateway' ? 20 : 11;
+    ctx.fillStyle=b.accent; ctx.fillRect(sx+bw/2-1,sy-anH,2,anH);
+    var orbR = b.id==='gateway' ? 5 : 3;
+    ctx.fillStyle=b.accent; ctx.fillRect(sx+bw/2-orbR,sy-anH-orbR*2,orbR*2,orbR*2);
+    var ga2 = Math.round(50+gp*100).toString(16).padStart(2,'0');
+    ctx.fillStyle=b.accent+ga2; ctx.fillRect(sx+bw/2-orbR-2,sy-anH-orbR*2-2,orbR*2+4,orbR*2+4);
+  }
+
+  // Coral deco corners
+  ctx.fillStyle='#ff4a6a'; ctx.fillRect(sx+2,sy-4,3,5); ctx.fillRect(sx+bw-5,sy-4,3,5);
+  ctx.fillStyle='#00ffaa'; ctx.fillRect(sx+3,sy-5,1,2); ctx.fillRect(sx+bw-4,sy-5,1,2);
+
+  // Name sign
+  ctx.fillStyle='rgba(0,0,10,0.88)'; ctx.fillRect(sx+1,sy-15,bw-2,12);
+  ctx.fillStyle=b.accent; ctx.font='bold 6px "Press Start 2P",monospace';
+  ctx.textAlign='center'; ctx.fillText(b.label, sx+bw/2, sy-6);
+
+  // Activity indicator dot
+  if (isActive) {
+    ctx.fillStyle=b.accent; ctx.fillRect(sx+bw-8,sy+2,5,5);
+    ctx.fillStyle=b.accent+Math.round(gp*200).toString(16).padStart(2,'0');
+    ctx.fillRect(sx+bw-10,sy,9,9);
+  }
+}
+
+// ── LOBSTER SPRITE ────────────────────────────────────────────────────────────
+function drawAgent(a) {
+  var sx = a.px - camX, sy = a.py - camY;
+  if (sx < -40 || sx > W+40 || sy < -40 || sy > H+40) return;
+  var C1=a.color, C2=a.colorDark, CL=a.colorLight;
+  var isW=a.state==='walking', isWk=a.state==='working';
+  var bob = isW ? Math.sin(a.walkFrame*Math.PI*0.5)*2 : 0;
+  var wkb = isWk ? Math.sin(tick*0.12+a.px*0.01)*1 : 0;
+  var bx=Math.round(sx-7), by=Math.round(sy-14+bob+wkb);
+
+  // Water shadow
+  ctx.fillStyle='rgba(0,0,0,0.22)';
+  ctx.beginPath(); ctx.ellipse(sx,sy+2,7,3,0,0,Math.PI*2); ctx.fill();
+
+  // Tail fan
+  var tw = Math.round(Math.sin(a.tailWave)*2);
+  ctx.fillStyle=C2; ctx.fillRect(bx+1,by+14,12,5);
+  ctx.fillStyle=C1; ctx.fillRect(bx+2,by+14,4,4); ctx.fillRect(bx+6,by+14,4,4);
+  ctx.fillRect(bx+1+tw,by+16,3,3); ctx.fillRect(bx+10-tw,by+16,3,3);
+
+  // Abdomen (segmented)
+  ctx.fillStyle=C2; ctx.fillRect(bx+2,by+7,10,8);
+  ctx.fillStyle=C1; ctx.fillRect(bx+3,by+8,8,6);
+  ctx.fillStyle=C2; ctx.fillRect(bx+3,by+10,8,1); ctx.fillRect(bx+3,by+12,8,1);
+
+  // Carapace
+  ctx.fillStyle=C2; ctx.fillRect(bx+1,by+2,12,8);
+  ctx.fillStyle=C1; ctx.fillRect(bx+2,by+3,10,6);
+  ctx.fillStyle=CL; ctx.fillRect(bx+3,by+3,4,3);
+
+  // Head
+  ctx.fillStyle=C2; ctx.fillRect(bx+2,by-1,10,5);
+  ctx.fillStyle=C1; ctx.fillRect(bx+3,by,8,4);
+
+  // Eye stalks
+  ctx.fillStyle=C2; ctx.fillRect(bx+2,by-2,2,3); ctx.fillRect(bx+10,by-2,2,3);
+  ctx.fillStyle='#ffffff'; ctx.fillRect(bx+2,by-2,2,2); ctx.fillRect(bx+10,by-2,2,2);
+  ctx.fillStyle='#000000'; ctx.fillRect(bx+2,by-2,1,1); ctx.fillRect(bx+11,by-2,1,1);
+
+  // Antennae (wave)
+  var antW = Math.round(Math.sin(tick*0.07+a.px*0.03)*2);
+  ctx.fillStyle=a.antennae;
+  ctx.fillRect(bx+2,by-5+Math.round(antW*0.5),1,4);
+  ctx.fillRect(bx+1,by-8+antW,1,4);
+  ctx.fillRect(bx+11,by-5+Math.round(-antW*0.5),1,4);
+  ctx.fillRect(bx+12,by-8-antW,1,4);
+  ctx.fillRect(bx+4,by-3,1,3); ctx.fillRect(bx+9,by-3,1,3);
+
+  // Claws
+  var ca = isWk ? Math.round(Math.sin(tick*0.15)*2) : 0;
+  ctx.fillStyle=C2; ctx.fillRect(bx-3,by+3+ca,5,5);
+  ctx.fillStyle=C1; ctx.fillRect(bx-2,by+4+ca,4,4);
+  ctx.fillStyle=CL; ctx.fillRect(bx-2,by+4+ca,2,2);
+  if (isWk) { ctx.fillStyle='#020c18'; ctx.fillRect(bx-1,by+6+ca,2,2); }
+  ctx.fillStyle=C2; ctx.fillRect(bx+12,by+3-ca,5,5);
+  ctx.fillStyle=C1; ctx.fillRect(bx+12,by+4-ca,4,4);
+  ctx.fillStyle=CL; ctx.fillRect(bx+14,by+4-ca,2,2);
+  if (isWk) { ctx.fillStyle='#020c18'; ctx.fillRect(bx+13,by+6-ca,2,2); }
+
+  // Walking legs
+  var lo = isW ? (a.walkFrame%2)*2 : 0;
+  ctx.fillStyle=C2;
+  for (var li=0; li<3; li++) {
+    ctx.fillRect(bx+3+li*3,by+9,1,4+Math.round(li%2===0?lo:-lo));
+    ctx.fillRect(bx+11-li*3,by+9,1,4+Math.round(li%2===0?-lo:lo));
+  }
+
+  // Name tag
+  ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(sx-29,by-21,58,12);
+  ctx.fillStyle=a.color; ctx.font='8px "Press Start 2P",monospace';
+  ctx.textAlign='center'; ctx.fillText(a.name, sx, by-11);
+
+  // State icon
+  if (isWk) { ctx.font='9px serif'; ctx.fillText('⚡', sx+20, by-2); }
+  else if (isW) { ctx.font='9px serif'; ctx.fillText('💨', sx+20, by-2); }
+}
+
+// ── BUBBLES ───────────────────────────────────────────────────────────────────
+var BUBBLES = [];
+for (var bi=0; bi<50; bi++) {
+  BUBBLES.push({
+    x: Math.random()*MW*TILE, y: Math.random()*MH*TILE,
+    r: 0.8+Math.random()*3, speed: 0.25+Math.random()*0.45, phase: Math.random()*Math.PI*2
+  });
+}
+
+function drawBubbles() {
+  for (var i=0; i<BUBBLES.length; i++) {
+    var b = BUBBLES[i];
+    b.y -= b.speed * simSpeed;
+    b.x += Math.sin(tick*0.02+b.phase)*0.25;
+    if (b.y < -20) { b.y = MH*TILE+10; b.x = Math.random()*MW*TILE; }
+    var bsx=b.x-camX, bsy=b.y-camY;
+    if (bsx<-10||bsx>W+10||bsy<-10||bsy>H+10) continue;
+    ctx.strokeStyle='rgba(80,200,255,0.3)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(bsx,bsy,b.r,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle='rgba(120,220,255,0.05)'; ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.4)';
+    ctx.fillRect(bsx-b.r*0.4,bsy-b.r*0.5,Math.max(1,b.r*0.4),Math.max(1,b.r*0.4));
+  }
+}
+
+// ── CAUSTIC RAYS ──────────────────────────────────────────────────────────────
+function drawCaustics() {
+  ctx.save(); ctx.globalAlpha=0.025;
+  for (var ci=0; ci<6; ci++) {
+    var rx = ci*W*0.2 + Math.sin(tick*0.015+ci*1.1)*W*0.05;
+    var rw = 35+Math.sin(tick*0.02+ci*0.9)*18;
+    ctx.fillStyle='rgba(0,160,255,1)';
+    ctx.beginPath(); ctx.moveTo(rx,0); ctx.lineTo(rx+rw,0);
+    ctx.lineTo(rx+rw*0.7+Math.sin(tick*0.01)*15,H);
+    ctx.lineTo(rx-rw*0.3+Math.sin(tick*0.012)*15,H);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ── MINIMAP ───────────────────────────────────────────────────────────────────
+function drawMinimap() {
+  var mmW=120, mmH=84, scaleX=mmW/MW, scaleY=mmH/MH;
+  mmCtx.fillStyle='#020c18'; mmCtx.fillRect(0,0,mmW,mmH);
+
+  // Draw building footprints
+  BUILDINGS.forEach(function(b) {
+    mmCtx.fillStyle = b.accent + '88';
+    mmCtx.fillRect(b.x*scaleX, b.y*scaleY, b.w*scaleX, b.h*scaleY);
+  });
+
+  // Paths
+  for (var ty=0; ty<MH; ty+=2) for (var tx=0; tx<MW; tx+=2) {
+    if (map[ty][tx]===1) { mmCtx.fillStyle='#0a3050'; mmCtx.fillRect(tx*scaleX,ty*scaleY,scaleX*2,scaleY*2); }
+  }
+
+  // Agents
+  AGENTS.forEach(function(a) {
+    var ax=(a.px/TILE)*scaleX, ay=(a.py/TILE)*scaleY;
+    mmCtx.fillStyle=a.color;
+    mmCtx.fillRect(ax-2,ay-2,4,4);
+  });
+
+  // Camera viewport rect
+  mmCtx.strokeStyle='rgba(0,229,255,0.5)'; mmCtx.lineWidth=1;
+  mmCtx.strokeRect(
+    (camX/TILE)*scaleX, (camY/TILE)*scaleY,
+    (W/TILE)*scaleX, (H/TILE)*scaleY
+  );
+}
+
+// ── CAMERA ────────────────────────────────────────────────────────────────────
+function updateCamera() {
+  var molty = AGENTS[0];
+  camX += (molty.px - W/2 - camX) * 0.05;
+  camY += (molty.py - H/2 - camY) * 0.05;
+  camX = Math.max(0, Math.min(MW*TILE - W, camX));
+  camY = Math.max(0, Math.min(MH*TILE - H, camY));
+}
+
+// ── DRAG / PAN ────────────────────────────────────────────────────────────────
+var isDragging=false, dragStart={x:0,y:0}, camStart={x:0,y:0};
+canvas.addEventListener('mousedown', function(e) {
+  var rect=canvas.getBoundingClientRect();
+  var mx=e.clientX-rect.left+camX, my=e.clientY-rect.top+camY;
+  var hit=false;
+  for (var i=0; i<AGENTS.length; i++) {
+    if (Math.abs(AGENTS[i].px-mx)<14 && Math.abs(AGENTS[i].py-my)<16) {
+      openAgentPanel(AGENTS[i]); hit=true; break;
+    }
+  }
+  if (!hit) {
+    for (var j=0; j<BUILDINGS.length; j++) {
+      var b=BUILDINGS[j];
+      if (mx>=b.x*TILE && mx<(b.x+b.w)*TILE && my>=b.y*TILE && my<(b.y+b.h)*TILE) {
+        openBuildingPanel(b); hit=true; break;
+      }
+    }
+  }
+  if (!hit) { isDragging=true; dragStart={x:e.clientX,y:e.clientY}; camStart={x:camX,y:camY}; }
+});
+canvas.addEventListener('mousemove', function(e) {
+  if (!isDragging) return;
+  camX = camStart.x-(e.clientX-dragStart.x);
+  camY = camStart.y-(e.clientY-dragStart.y);
+});
+canvas.addEventListener('mouseup', function(){ isDragging=false; });
+canvas.addEventListener('mouseleave', function(){ isDragging=false; });
+
+var lastTouch=null;
+canvas.addEventListener('touchstart',function(e){e.preventDefault();lastTouch={x:e.touches[0].clientX,y:e.touches[0].clientY};},{passive:false});
+canvas.addEventListener('touchmove',function(e){e.preventDefault();if(!lastTouch)return;camX-=e.touches[0].clientX-lastTouch.x;camY-=e.touches[0].clientY-lastTouch.y;lastTouch={x:e.touches[0].clientX,y:e.touches[0].clientY};},{passive:false});
+canvas.addEventListener('touchend',function(){lastTouch=null;});
+
+// ── INSPECTOR PANELS ──────────────────────────────────────────────────────────
+function typeColor(type) {
+  return {gateway:'#00e5ff',agent:'#ff6b35',database:'#ffd060',cron:'#cc88ff',skills:'#00ff88',channels:'#ff88cc',tool:'#44aaff'}[type]||'#aaa';
+}
+
+function openAgentPanel(a) {
+  var sched=a.schedule[a.schedIdx%a.schedule.length];
+  var bldg=null;
+  if (sched) for (var i=0;i<BUILDINGS.length;i++){if(BUILDINGS[i].id===sched.p){bldg=BUILDINGS[i];break;}}
+  var h='<div class="ip-title">'+a.name+'<br><span style="font-size:6px;color:'+a.color+'">'+a.role+'</span></div>';
+  h+='<div class="ip-section">◈ STATUS</div>';
+  h+='<div class="ip-row">state: <span>'+a.state.toUpperCase()+'</span></div>';
+  h+='<div class="ip-row">location: <span>'+(a.currentBuilding?a.currentBuilding.name:'open water')+'</span></div>';
+  h+='<div class="ip-row">next task: <span>'+(sched?sched.a:'—')+'</span></div>';
+  h+='<div class="ip-section">⚙ PROPERTIES</div>';
+  for (var k in a.details) h+='<div class="ip-row">'+k+': <span>'+a.details[k]+'</span></div>';
+  h+='<div class="ip-section">🧠 MEMORY STREAM</div>';
+  a.memoryStream.slice(0,6).forEach(function(m){h+='<div class="ip-mem">▸ '+m+'</div>';});
+  h+='<div class="ip-section">💭 REFLECTIONS</div>';
+  a.reflections.forEach(function(r){h+='<div class="ip-plan">▸ '+r+'</div>';});
+  h+='<div class="ip-section">📋 PLANS</div>';
+  a.plans.forEach(function(p){h+='<div class="ip-event">▸ '+p+'</div>';});
+  h+='<div class="ip-section">📅 TODAY\'S SCHEDULE</div>';
+  a.schedule.slice(0,8).forEach(function(s){
+    var hh=Math.floor(s.t/60)%12||12,mm=s.t%60,ap=s.t>=720?'PM':'AM';
+    var bl=null;for(var i=0;i<BUILDINGS.length;i++){if(BUILDINGS[i].id===s.p){bl=BUILDINGS[i];break;}}
+    var cur=sched&&sched.t===s.t?' style="color:#00e5ff"':'';
+    h+='<div class="ip-mem"'+cur+'>▸ '+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0')+' '+ap+' — '+(bl?bl.name:s.p)+'</div>';
+  });
+  document.getElementById('ipc').innerHTML=h;
+  document.getElementById('infopanel').classList.add('show');
+}
+
+function openBuildingPanel(b) {
+  var color=typeColor(b.type);
+  var inside=AGENTS.filter(function(a){return a.currentBuilding&&a.currentBuilding.id===b.id;});
+  var actIdx=Math.floor(tick/200)%b.activities.length;
+  var h='<div class="ip-title" style="color:'+color+'">'+b.label+'</div>';
+  h+='<div style="font-family:\'Press Start 2P\',monospace;font-size:6px;color:#0a5070;margin-bottom:10px;line-height:1.9">'+b.desc+'</div>';
+  h+='<span class="ip-badge" style="color:'+color+';border-color:'+color+'">'+b.type.toUpperCase()+'</span>';
+  h+='<div class="ip-section">⚙ PROPERTIES</div>';
+  for (var k in b.details) h+='<div class="ip-row">'+k+': <span>'+b.details[k]+'</span></div>';
+  h+='<div class="ip-section">⚡ CURRENT ACTIVITY</div>';
+  h+='<div class="ip-mem">▸ '+b.activities[actIdx]+'</div>';
+  if (inside.length) {
+    h+='<div class="ip-section">🦞 AGENTS INSIDE ('+inside.length+')</div>';
+    inside.forEach(function(a){h+='<div class="ip-mem" style="color:'+a.color+'">▸ '+a.name+' — '+a.state+'</div>';});
+  } else {
+    h+='<div class="ip-row">agents: <span>none currently</span></div>';
+  }
+  document.getElementById('ipc').innerHTML=h;
+  document.getElementById('infopanel').classList.add('show');
+}
+
+// ── CONTROLS ──────────────────────────────────────────────────────────────────
+function setSpeed(s) {
+  simSpeed = s;
+  var speeds=[0.5,1,2,4,8];
+  var labels=['½x','1x','2x','4x','8x'];
+  document.querySelectorAll('.spdbtn').forEach(function(btn,i){
+    if (i<5) btn.classList.toggle('active', speeds[i]===s);
+  });
+}
+window.setSpeed=setSpeed;
+
+function nextDay() {
+  simTime=0; simDay++;
+  globalProcessed={};
+  addLog('=== DAY '+simDay+' BEGINS ===','warn');
+}
+window.nextDay=nextDay;
+
+// ── MAIN LOOP ─────────────────────────────────────────────────────────────────
+function loop() {
+  tick++;
+  simTime += 0.025 * simSpeed;
+  if (simTime >= 24*60) { simTime=0; simDay++; globalProcessed={}; addLog('=== NEW DAY ===','warn'); }
+
+  AGENTS.forEach(updateAgent);
+  processScriptedEvents();
+  maybeChatter();
+  updateCamera();
+  updateSpeech();
+
+  // Render
+  ctx.fillStyle='#020c18'; ctx.fillRect(0,0,W,H);
+  drawCaustics();
+
+  var tx0=Math.max(0,Math.floor(camX/TILE)-1), tx1=Math.min(MW,Math.ceil((camX+W)/TILE)+1);
+  var ty0=Math.max(0,Math.floor(camY/TILE)-1), ty1=Math.min(MH,Math.ceil((camY+H)/TILE)+1);
+  for (var ty=ty0; ty<ty1; ty++) for (var tx=tx0; tx<tx1; tx++) drawTile(tx,ty);
+
+  drawBubbles();
+  BUILDINGS.forEach(drawBuilding);
+  AGENTS.slice().sort(function(a,b){return a.py-b.py;}).forEach(drawAgent);
+
+  drawMinimap();
+
+  // Clock
+  var h=Math.floor(simTime/60)%24, m=Math.floor(simTime%60);
+  var ap=h>=12?'PM':'AM', hh=h>12?h-12:h===0?12:h;
+  document.getElementById('clockel').innerHTML=
+    String(hh).padStart(2,'0')+':'+String(m).padStart(2,'0')+' '+ap+
+    '<br><span style="font-size:6px;color:#0a3050">DAY '+simDay+' · SIM</span>';
+
+  requestAnimationFrame(loop);
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', function(){
+  resize();
+  camX = AGENTS[0].px - W/2;
+  camY = AGENTS[0].py - H/2;
+  addLog('Clawville simulation started','new');
+  addLog('5 agents loaded and active','new');
+  addLog('Gateway Spire online','new');
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
