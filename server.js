@@ -274,23 +274,23 @@ function onGatewayEvent(event) {
 // ── Gateway init ──────────────────────────────────────────────────────────────
 function initGateway(tokenOverride) {
   const useToken = tokenOverride ?? resolvedToken;
-  const canConnect = ocConfig.found || useToken;
+  // Only connect when we have a token. Without one, show demo and wait for user input.
+  const hasToken = !!useToken;
+  const gatewayUrl = ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789';
 
-  if (!canConnect) {
-    // No config and no token — show demo, ask for token
+  if (!hasToken) {
     latestWorld = demoWorld();
     broadcast({ type:'world-init', world:latestWorld, mode:'demo' });
     broadcast({ type:'jobboard-update', jobBoard });
-    broadcast({ type:'needs-token', gatewayUrl: ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789' });
+    broadcast({ type:'needs-token', gatewayUrl });
     return;
   }
 
   // Tear down any existing connection first
   if (gatewayConn) { gatewayConn.destroy(); gatewayConn = null; }
 
-  const url = ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789';
   gatewayConn = createGatewayClient(
-    url, useToken,
+    gatewayUrl, useToken,
     (state, req) => {
       reqFn = req;
       const ds = {
@@ -317,7 +317,7 @@ function initGateway(tokenOverride) {
       broadcast({ type:'gateway-error', error:err });
       if (err.type === 'auth' || err.type === 'pairing') {
         broadcast({ type:'needs-token',
-          gatewayUrl: url,
+          gatewayUrl,
           error: err.message,
           isPairing: err.type === 'pairing' });
       }
