@@ -108,11 +108,18 @@ function bfs(sx, sy, ex, ey) {
 
 function getBEntry(b) { return [Math.floor(b.x+b.w/2), b.y+b.h]; }
 
-function routeInboundAgent(channelId) {
+function routeInboundAgent(channelId, payload) {
   const ch = (channelId||'').toLowerCase();
-  if (ch.includes('telegram')) return AGENTS.find(a => a.id === 'telegram-updates' || /barbara/i.test(a.name));
+  const barbara = AGENTS.find(a => a.id === 'telegram-updates' || /barbara/i.test(a.name));
+
+  if (ch.includes('telegram')) return barbara;
   if (ch.includes('discord')) return AGENTS.find(a => a.id.includes('discord'));
   if (ch.includes('whatsapp')) return AGENTS.find(a => a.id.includes('whatsapp'));
+
+  // Heuristic: inbound external chat with unknown channel id should prefer Barbara
+  // when she exists (most common case in this setup is Telegram direct messages).
+  if ((!ch || ch === 'channel') && barbara && payload?.text) return barbara;
+
   return AGENTS.find(a => a.hierarchyRole === 'manager') ?? AGENTS[0];
 }
 
@@ -756,7 +763,7 @@ function handleGatewayEvent(event) {
     const text = p?.text ? p.text.slice(0,30) : null;
 
     // Transport layer: mailman carries inbound packet.
-    const receiver = routeInboundAgent(ch);
+    const receiver = routeInboundAgent(ch, p);
     dispatchDelivery(ch, text, receiver);
 
     // Decision layer: assigned agent triages and then delegates/execut es.
