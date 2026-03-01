@@ -80,6 +80,7 @@ let latestWorld  = null;
 let currentState = null;
 let jobBoard     = mkJobBoard();
 let reqFn        = null;
+let lastGatewayEventSeq = null;
 const pollTimers = {};
 const browsers   = new Set();
 
@@ -165,7 +166,8 @@ function stopPolling() { Object.values(pollTimers).forEach(clearInterval); }
 
 // ── Apply update ──────────────────────────────────────────────────────────────
 function applyUpdate(nextState) {
-  const changes = currentState ? diffState(currentState, nextState) : [];
+  const rawChanges = currentState ? diffState(currentState, nextState) : [];
+  const changes = reconcileChanges(rawChanges);
   currentState = nextState;
   refreshJobBoardFromState(nextState);
   broadcast({ type:'jobboard-update', jobBoard });
@@ -234,6 +236,12 @@ function handleChange(ch) {
 
 // ── Gateway event handler ─────────────────────────────────────────────────────
 function onGatewayEvent(event) {
+  // Drop out-of-order / duplicate gateway events when seq is provided
+  if (typeof event?.seq === 'number') {
+    if (lastGatewayEventSeq !== null && event.seq <= lastGatewayEventSeq) return;
+    lastGatewayEventSeq = event.seq;
+  }
+
   broadcast({ type:'gateway-event', event });
   const e = event.event, p = event.payload;
 
@@ -398,6 +406,28 @@ httpServer.on('error', e => {
 process.on('SIGINT', () => { console.log('\n🦞 bye'); stopPolling(); gatewayConn?.destroy(); process.exit(0); });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function reconcileChanges(changes) {
+  if (!Array.isArray(changes) || !changes.length) return [];
+
+  const byKey = new Map();
+  for (const c of changes) {
+    const key = `${c.type}:${c.id}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, c);
+      continue;
+    }
+
+    // Keep the latest event by timestamp for same entity
+    if ((c.ts ?? 0) >= (prev.ts ?? 0)) byKey.set(key, c);
+  }
+
+  // Remove impossible flips emitted in the same reconciliation window
+  const out = Array.from(byKey.values()).filter(c => !(c.action === 'add' && c.next == null));
+  out.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  return out;
+}
+
 function short(k) { return k.length>32 ? k.slice(0,30)+'…' : k; }
 function rid()    { return Math.random().toString(36).slice(2,9); }
 function cap(s)   { return s ? s[0].toUpperCase()+s.slice(1) : s; }
