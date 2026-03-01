@@ -118,6 +118,46 @@ canvas{display:block;width:100%;height:100%}
   opacity:0;transition:opacity .4s ease-out;
   background:radial-gradient(ellipse at center,rgba(255,208,96,.07) 0%,transparent 65%)}
 #beam-flash.on{opacity:1}
+
+/* ─── Token / config modal ────────────────────────────────────────────────── */
+#modal-overlay{position:fixed;inset:0;background:rgba(0,3,12,0.92);
+  display:flex;align-items:center;justify-content:center;
+  z-index:900;pointer-events:all}
+#modal-overlay.hidden{display:none}
+#modal-box{background:rgba(1,6,20,0.99);border:2px solid #0a3050;
+  padding:28px 32px;max-width:460px;width:calc(100% - 40px);
+  font-family:'Press Start 2P',monospace;position:relative}
+.modal-title{font-size:10px;color:#00e5ff;margin-bottom:6px;
+  text-shadow:0 0 10px rgba(0,229,255,.5)}
+.modal-sub{font-size:6px;color:#0a4a68;line-height:2.2;margin-bottom:20px}
+.modal-sub a{color:#00e5ff;text-decoration:none}
+.modal-label{font-size:6px;color:#0a4060;margin-bottom:6px;display:block}
+.modal-input{width:100%;font-family:'Share Tech Mono',monospace;font-size:12px;
+  background:rgba(0,10,28,0.9);border:1px solid #0a2840;color:#7ef7ff;
+  padding:9px 12px;outline:none;margin-bottom:8px;letter-spacing:.05em}
+.modal-input:focus{border-color:#00e5ff}
+.modal-input::placeholder{color:#0a3a5a;font-size:10px}
+.modal-err{font-size:6px;color:#ff5555;min-height:12px;margin-bottom:10px;line-height:2}
+.modal-row{display:flex;gap:8px;align-items:center;margin-top:4px}
+.modal-btn{font-family:'Press Start 2P',monospace;font-size:7px;
+  border:1px solid;padding:7px 16px;cursor:pointer;transition:all .1s;
+  background:transparent}
+.modal-btn.primary{color:#00e5ff;border-color:#00e5ff}
+.modal-btn.primary:hover{background:#00e5ff;color:#000}
+.modal-btn.danger{color:#ff5555;border-color:#2a0808;font-size:6px;margin-left:auto}
+.modal-btn.danger:hover{background:#ff5555;color:#000;border-color:#ff5555}
+.modal-btn.ghost{color:#0a4060;border-color:#0a1a28;font-size:6px}
+.modal-btn.ghost:hover{color:#7ef7ff;border-color:#7ef7ff}
+.modal-divider{border:none;border-top:1px solid #0a1e30;margin:18px 0}
+.modal-section-title{font-size:6px;color:#0a3050;margin-bottom:12px;letter-spacing:.1em}
+
+/* ─── Gear config button ──────────────────────────────────────────────────── */
+#cfg-btn{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
+  font-family:'Press Start 2P',monospace;font-size:6px;
+  background:rgba(0,10,28,0.96);border:1px solid #0a1e30;
+  color:#0a3050;padding:5px 10px;cursor:pointer;pointer-events:all;
+  z-index:51;transition:all .12s}
+#cfg-btn:hover{color:#7ef7ff;border-color:#0a3050}
 </style>
 </head>
 <body>
@@ -125,6 +165,70 @@ canvas{display:block;width:100%;height:100%}
   <div id="splash-title">🦞 CLAWCOVE</div>
   <div id="splash-msg">Connecting to OpenClaw gateway…</div>
   <div id="splash-sub"></div>
+</div>
+
+<!-- Token / Config modal -->
+<div id="modal-overlay" class="hidden">
+  <div id="modal-box">
+    <div id="modal-token-view">
+      <div class="modal-title">⚓ GATEWAY TOKEN</div>
+      <div class="modal-sub" id="modal-hint-text">
+        To find your token, run <span style="color:#ffd060">openclaw dashboard</span><br>
+        and look in the <strong style="color:#7ef7ff">Overview</strong> tab — it's listed there.<br>
+        Paste it below and ClawCove will connect automatically.
+      </div>
+      <label class="modal-label">GATEWAY TOKEN</label>
+      <input id="modal-token-input" class="modal-input" type="password"
+        placeholder="paste your gateway token here"
+        onkeydown="if(event.key==='Enter')saveTokenFromModal()"/>
+      <div class="modal-err" id="modal-err"></div>
+      <div class="modal-row">
+        <button class="modal-btn primary" onclick="saveTokenFromModal()">✓ CONNECT</button>
+        <button class="modal-btn ghost" id="modal-cancel-btn" onclick="closeModal()" style="display:none">CANCEL</button>
+      </div>
+    </div>
+
+    <div id="modal-config-view" style="display:none">
+      <div class="modal-title">⚙ SETTINGS</div>
+
+      <div class="modal-section-title">◈ GATEWAY TOKEN</div>
+      <div class="modal-sub" style="margin-bottom:12px">
+        Token is stored at <span style="color:#ffd060">~/.openclaw/clawcove-token</span>
+      </div>
+      <label class="modal-label">REPLACE TOKEN</label>
+      <input id="cfg-token-input" class="modal-input" type="password"
+        placeholder="paste new token to replace…"
+        onkeydown="if(event.key==='Enter')saveTokenFromConfig()"/>
+      <div class="modal-err" id="cfg-err"></div>
+      <div class="modal-row" style="margin-bottom:0">
+        <button class="modal-btn primary" onclick="saveTokenFromConfig()">✓ SAVE TOKEN</button>
+        <button class="modal-btn danger" onclick="resetToken()">✕ RESET TOKEN</button>
+      </div>
+
+      <hr class="modal-divider"/>
+
+      <div class="modal-section-title">◈ DISPLAY</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+        <label style="font-size:6px;color:#0a5070;display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="cfg-speech" onchange="toggleSetting('speech',this.checked)" checked/>
+          <span>Show speech bubbles</span>
+        </label>
+        <label style="font-size:6px;color:#0a5070;display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="cfg-collab" onchange="toggleSetting('collab',this.checked)" checked/>
+          <span>Show collaboration lines</span>
+        </label>
+        <label style="font-size:6px;color:#0a5070;display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="cfg-chatter" onchange="toggleSetting('chatter',this.checked)" checked/>
+          <span>Random agent chatter</span>
+        </label>
+      </div>
+
+      <div class="modal-row">
+        <button class="modal-btn primary" onclick="closeModal()">✓ DONE</button>
+        <div style="font-size:5px;color:#0a2030;margin-left:auto">ClawCove v0.2.0</div>
+      </div>
+    </div>
+  </div>
 </div>
 <div id="beam-flash"></div>
 
@@ -157,6 +261,7 @@ canvas{display:block;width:100%;height:100%}
     </div>
 
     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+      <button class="tbtn" onclick="openConfigModal()" title="Settings" style="font-size:10px;padding:3px 7px">⚙</button>
       <div id="status-pill" class="connecting">CONNECTING</div>
       <div id="clockel">—</div>
     </div>

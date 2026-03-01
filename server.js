@@ -3,8 +3,9 @@
 // Usage: node server.js  |  npx clawcove
 
 import { createServer } from 'http';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -17,22 +18,44 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const PORT  = parseInt(process.env.CLAWCOVE_PORT ?? '2788', 10);
 const AUTO_OPEN = process.env.CLAWCOVE_NO_OPEN !== '1';
 
+// ── Token persistence ─────────────────────────────────────────────────────────
+// Users paste their gateway token once via the UI. We save it to
+// ~/.openclaw/clawcove-token (mode 0600) so it survives restarts
+// without modifying openclaw.json.
+const TOKEN_FILE = join(homedir(), '.openclaw', 'clawcove-token');
+
+function loadSavedToken() {
+  try { return readFileSync(TOKEN_FILE, 'utf8').trim() || null; } catch { return null; }
+}
+function saveToken(t) {
+  try {
+    mkdirSync(join(homedir(), '.openclaw'), { recursive: true });
+    writeFileSync(TOKEN_FILE, t.trim(), { mode: 0o600 });
+    return true;
+  } catch { return false; }
+}
+function clearToken() {
+  try { writeFileSync(TOKEN_FILE, '', { mode: 0o600 }); return true; } catch { return false; }
+}
+
 const POLL_FAST   = 10_000;
 const POLL_NORMAL = 30_000;
 const POLL_SLOW   = 300_000;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const ocConfig = loadOpenclawConfig();
+// Resolve token: openclaw.json → clawcove-token file → null (user prompted in UI)
+const resolvedToken = ocConfig.token ?? loadSavedToken();
 if (!ocConfig.found) {
   console.warn(`\n⚠  ${ocConfig.error}`);
-  console.warn('   Running in demo mode.\n');
+  console.warn(resolvedToken ? '   Token found in clawcove-token file.' : '   Running in demo mode (no token).\n');
 }
 console.log(`\n🦞 CLAWCOVE`);
 if (ocConfig.found) {
   console.log(`   Config:  ${ocConfig.configPath}`);
   console.log(`   Gateway: ${ocConfig.gatewayUrl}`);
-  console.log(`   Token:   ${ocConfig.token ? '✓ found' : '✗ not set'}`);
 }
+console.log(`   Token:   ${resolvedToken ? '✓ found' : '✗ not set — will prompt in UI'}`);
 
 // ── Static server ─────────────────────────────────────────────────────────────
 const MIME = { '.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json' };
@@ -249,15 +272,25 @@ function onGatewayEvent(event) {
 }
 
 // ── Gateway init ──────────────────────────────────────────────────────────────
-function initGateway() {
-  if (!ocConfig.found) {
+function initGateway(tokenOverride) {
+  const useToken = tokenOverride ?? resolvedToken;
+  const canConnect = ocConfig.found || useToken;
+
+  if (!canConnect) {
+    // No config and no token — show demo, ask for token
     latestWorld = demoWorld();
     broadcast({ type:'world-init', world:latestWorld, mode:'demo' });
     broadcast({ type:'jobboard-update', jobBoard });
+    broadcast({ type:'needs-token', gatewayUrl: ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789' });
     return;
   }
+
+  // Tear down any existing connection first
+  if (gatewayConn) { gatewayConn.destroy(); gatewayConn = null; }
+
+  const url = ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789';
   gatewayConn = createGatewayClient(
-    ocConfig.gatewayUrl, ocConfig.token,
+    url, useToken,
     (state, req) => {
       reqFn = req;
       const ds = {
@@ -269,18 +302,28 @@ function initGateway() {
       };
       currentState = ds;
       const fresh = generateWorld(state);
-      const saved = loadSavedLayout(ocConfig.clawcoveDir);
+      const saved = loadSavedLayout(ocConfig.clawcoveDir ?? join(homedir(), '.openclaw', 'workspace', 'clawcove'));
       latestWorld = mergeLayouts(saved, fresh);
-      saveLayout(ocConfig.clawcoveDir, latestWorld);
+      saveLayout(ocConfig.clawcoveDir ?? join(homedir(), '.openclaw', 'workspace', 'clawcove'), latestWorld);
       console.log(`[clawcove] city: ${latestWorld.buildings.length} buildings, ${latestWorld.agents.length} agents`);
       broadcast({ type:'world-init', world:latestWorld, mode:'live' });
+      broadcast({ type:'token-ok' });
       refreshJobBoardFromState(currentState);
       broadcast({ type:'jobboard-update', jobBoard });
       startPolling();
     },
     onGatewayEvent,
-    (err) => { broadcast({ type:'gateway-error', error:err }); stopPolling(); },
-    { stateDir: ocConfig.stateDir }  // pass stateDir for device credential persistence
+    (err) => {
+      broadcast({ type:'gateway-error', error:err });
+      if (err.type === 'auth' || err.type === 'pairing') {
+        broadcast({ type:'needs-token',
+          gatewayUrl: url,
+          error: err.message,
+          isPairing: err.type === 'pairing' });
+      }
+      stopPolling();
+    },
+    { stateDir: ocConfig.stateDir ?? join(homedir(), '.openclaw') }
   );
 }
 
@@ -288,13 +331,52 @@ function initGateway() {
 wss.on('connection', ws => {
   console.log('[clawcove] browser connected');
   browsers.add(ws);
+
+  // Tell the browser whether a token exists
+  ws.send(JSON.stringify({
+    type: 'server-config',
+    hasToken: !!(resolvedToken),
+    gatewayUrl: ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789',
+  }));
+
   if (latestWorld) {
     ws.send(JSON.stringify({ type:'world-init', world:latestWorld,
       mode:gatewayConn?.isConnected()?'live':'cached' }));
     ws.send(JSON.stringify({ type:'jobboard-update', jobBoard }));
   } else {
-    ws.send(JSON.stringify({ type:'connecting', gatewayUrl:ocConfig.gatewayUrl }));
+    ws.send(JSON.stringify({ type:'connecting', gatewayUrl:ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789' }));
   }
+
+  ws.on('message', (raw) => {
+    let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    if (msg.type === 'save-token') {
+      const t = (msg.token ?? '').trim();
+      if (!t) { ws.send(JSON.stringify({ type:'token-error', error:'Token cannot be empty' })); return; }
+      saveToken(t);
+      console.log('[clawcove] token saved, reinitialising gateway…');
+      broadcast({ type:'log', text:'Token saved — connecting…', level:'new' });
+      initGateway(t);
+    }
+
+    if (msg.type === 'clear-token') {
+      clearToken();
+      if (gatewayConn) { gatewayConn.destroy(); gatewayConn = null; }
+      stopPolling();
+      console.log('[clawcove] token cleared');
+      broadcast({ type:'token-cleared' });
+      broadcast({ type:'needs-token', gatewayUrl: ocConfig.gatewayUrl ?? 'ws://127.0.0.1:18789' });
+    }
+
+    if (msg.type === 'user-message') {
+      // Forward user message to manager agent via gateway
+      if (reqFn && msg.text) {
+        reqFn('chat.send', { text: msg.text, target: msg.target ?? 'main' })
+          .catch(e => console.error('[clawcove] chat.send failed:', e.message));
+      }
+    }
+  });
+
   ws.on('close', () => browsers.delete(ws));
   ws.on('error', () => browsers.delete(ws));
 });

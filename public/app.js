@@ -1285,7 +1285,7 @@ function connectToServer() {
   wsRef = ws;
   if (window._setChatWs) window._setChatWs(ws);
   ws.onopen = () => { setStatusPill('connecting','LOADING…'); };
-  ws.onmessage = e => { let m; try{m=JSON.parse(e.data);}catch{return;} handleMsg(m); };
+  ws.onmessage = e => { let m; try{m=JSON.parse(e.data);}catch{return;} (window.handleMsg??handleMsg)(m); };
   ws.onclose = () => {
     setStatusPill('offline','○ SERVER OFF');
     addLog('Connection lost — retrying…','warn');
@@ -2200,4 +2200,154 @@ window.handleGatewayEvent = function(event) {
 
 // Also expose wsRef setter so connectToServer can register the socket
 window._setChatWs = function(ws) { wsRef = ws; };
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOKEN MODAL + CONFIG PANEL
+// Shown on first launch (no token) or when gateway auth fails.
+// Also opened by the ⚙ button for settings.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _modalMode = 'token'; // 'token' | 'config'
+let _hasToken  = false;
+
+function openTokenModal(hint, isError = false) {
+  _modalMode = 'token';
+  const overlay = document.getElementById('modal-overlay');
+  const tv = document.getElementById('modal-token-view');
+  const cv = document.getElementById('modal-config-view');
+  const errEl = document.getElementById('modal-err');
+  const hintEl = document.getElementById('modal-hint-text');
+  const cancelBtn = document.getElementById('modal-cancel-btn');
+  if (!overlay) return;
+
+  if (tv) tv.style.display = '';
+  if (cv) cv.style.display = 'none';
+  if (errEl) { errEl.textContent = hint && isError ? hint : ''; errEl.style.color = isError ? '#ff5555' : '#ffd060'; }
+  if (hintEl && hint && !isError) hintEl.innerHTML = hint;
+  if (cancelBtn) cancelBtn.style.display = _hasToken ? '' : 'none';
+
+  overlay.classList.remove('hidden');
+  setTimeout(() => document.getElementById('modal-token-input')?.focus(), 80);
+}
+
+window.openConfigModal = function() {
+  _modalMode = 'config';
+  const overlay = document.getElementById('modal-overlay');
+  const tv = document.getElementById('modal-token-view');
+  const cv = document.getElementById('modal-config-view');
+  if (!overlay) return;
+  if (tv) tv.style.display = 'none';
+  if (cv) cv.style.display = '';
+
+  // Sync checkboxes with current settings
+  const s = loadSettings();
+  const el = (id) => document.getElementById(id);
+  if (el('cfg-speech'))  el('cfg-speech').checked  = s.speech  !== false;
+  if (el('cfg-collab'))  el('cfg-collab').checked  = s.collab  !== false;
+  if (el('cfg-chatter')) el('cfg-chatter').checked = s.chatter !== false;
+
+  overlay.classList.remove('hidden');
+};
+
+window.closeModal = function() {
+  document.getElementById('modal-overlay')?.classList.add('hidden');
+  document.getElementById('modal-err') && (document.getElementById('modal-err').textContent = '');
+  document.getElementById('cfg-err')   && (document.getElementById('cfg-err').textContent   = '');
+};
+
+window.saveTokenFromModal = function() {
+  const input = document.getElementById('modal-token-input');
+  const errEl = document.getElementById('modal-err');
+  const t = input?.value?.trim();
+  if (!t) { if (errEl) errEl.textContent = 'Token cannot be empty.'; return; }
+  if (errEl) errEl.textContent = '';
+  if (errEl) { errEl.style.color = '#ffd060'; errEl.textContent = 'Connecting…'; }
+  if (wsRef) wsRef.send(JSON.stringify({ type: 'save-token', token: t }));
+  if (input) input.value = '';
+};
+
+window.saveTokenFromConfig = function() {
+  const input = document.getElementById('cfg-token-input');
+  const errEl = document.getElementById('cfg-err');
+  const t = input?.value?.trim();
+  if (!t) { if (errEl) errEl.textContent = 'Enter a token to replace the current one.'; return; }
+  if (errEl) errEl.textContent = '';
+  if (wsRef) wsRef.send(JSON.stringify({ type: 'save-token', token: t }));
+  if (input) input.value = '';
+  if (errEl) { errEl.style.color = '#ffd060'; errEl.textContent = 'Saving…'; }
+};
+
+window.resetToken = function() {
+  if (!confirm('Clear the saved token? ClawCove will return to demo mode until a new token is entered.')) return;
+  if (wsRef) wsRef.send(JSON.stringify({ type: 'clear-token' }));
+  closeModal();
+};
+
+window.toggleSetting = function(key, val) {
+  const s = loadSettings();
+  s[key] = val;
+  saveSettings(s);
+  applySettings(s);
+};
+
+// ── Settings persistence (localStorage is not available; use in-memory + reload) ──
+// We use window-level vars so settings survive within a session.
+const _settings = { speech: true, collab: true, chatter: true };
+
+function loadSettings() { return { ..._settings }; }
+function saveSettings(s) { Object.assign(_settings, s); }
+function applySettings(s) {
+  // speech bubbles, collab lines, chatter controlled via flags read by draw loop
+  window._showSpeech  = s.speech  !== false;
+  window._showCollab  = s.collab  !== false;
+  window._showChatter = s.chatter !== false;
+}
+applySettings(_settings);
+
+// ── Handle server messages for token flow ─────────────────────────────────────
+const _origHandleMsg = handleMsg;
+window.handleMsg = function(msg) {
+  if (msg.type === 'server-config') {
+    _hasToken = !!msg.hasToken;
+    if (!_hasToken) {
+      // No token — show modal immediately after splash fades
+      setTimeout(() => openTokenModal(), 400);
+    }
+    return;
+  }
+
+  if (msg.type === 'needs-token') {
+    _hasToken = false;
+    const hint = msg.error
+      ? `<span style="color:#ff5555">${esc(msg.error)}</span>`
+      : null;
+    // Don't interrupt if config modal is open
+    if (_modalMode === 'config' && !msg.error) return;
+    openTokenModal(hint, !!msg.error);
+    return;
+  }
+
+  if (msg.type === 'token-ok') {
+    _hasToken = true;
+    closeModal();
+    addLog('Token accepted ✓', 'new');
+    cityEvent('🔑', 'Gateway token accepted', '#00ff88');
+    return;
+  }
+
+  if (msg.type === 'token-cleared') {
+    _hasToken = false;
+    addLog('Token cleared', 'warn');
+    return;
+  }
+
+  if (msg.type === 'token-error') {
+    const errEl = document.getElementById(_modalMode === 'config' ? 'cfg-err' : 'modal-err');
+    if (errEl) { errEl.style.color = '#ff5555'; errEl.textContent = msg.error; }
+    return;
+  }
+
+  _origHandleMsg(msg);
+};
 
