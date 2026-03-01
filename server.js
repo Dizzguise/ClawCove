@@ -13,6 +13,7 @@ import { loadOpenclawConfig } from './lib/config.js';
 import { createGatewayClient } from './lib/connect.js';
 import { generateWorld, loadSavedLayout, saveLayout, mergeLayouts } from './lib/worldgen.js';
 import { diffState } from './lib/diff.js';
+import { normalizeDiscoveredState, detectManagerAgentId } from './lib/state-model.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PORT  = parseInt(process.env.CLAWCOVE_PORT ?? '2788', 10);
@@ -95,27 +96,31 @@ function mkJobBoard() {
 }
 
 function refreshJobBoardFromState(state) {
-  const d = state?.discovered ?? state;
-  jobBoard.cronJobs = (d?.cron?.jobs ?? []).map(j => ({
+  const n = normalizeDiscoveredState(state);
+  const d = n.discovered;
+  const managerId = detectManagerAgentId(n.agents);
+
+  jobBoard.cronJobs = (n.cronJobs ?? []).map(j => ({
     id:j.id, label:j.label??j.id, schedule:j.schedule,
     enabled:j.enabled!==false, lastRun:j.lastRun??null,
     nextRun:j.nextRun??null, runCount:j.runCount??0, lastStatus:j.lastStatus??'—'
   }));
-  jobBoard.sessions = (d?.sessions?.sessions ?? []).map(s => ({
+  jobBoard.sessions = (n.sessions ?? []).map(s => ({
     sessionKey:s.sessionKey,
-    agentId:s.agentId??s.sessionKey?.split?.(':')?.[1]??'main',
-    contextTokens:s.contextTokens??0, updatedAt:s.updatedAt??null,
-    hot:(s.contextTokens??0)>50000
+    agentId:s.agentId ?? managerId,
+    contextTokens:s.contextTokens ?? 0,
+    updatedAt:s.updatedAt ?? null,
+    hot:(s.contextTokens ?? 0)>50000
   })).sort((a,b)=>b.contextTokens-a.contextTokens);
-  jobBoard.channels = Object.entries(d?.channels?.channels??{}).map(([id,info])=>({
+  jobBoard.channels = Object.entries(n.channels ?? {}).map(([id,info])=>({
     id, status:info?.status??(info?.linked?'linked':'unknown'),
     linked:!!(info?.linked||info?.status==='linked'), messageCount:info?.messageCount??0
   }));
-  jobBoard.skills = (d?.skills?.skills??[]).map(s=>({
+  jobBoard.skills = (n.skills ?? []).map(s=>({
     id:s.id??s.name, name:s.name??s.id, version:s.version??'—',
     enabled:s.enabled!==false, lastUsed:s.lastUsed??null
   }));
-  jobBoard.nodes = (d?.nodes?.nodes??[]).map(n=>({
+  jobBoard.nodes = (n.nodes ?? []).map(n=>({
     id:n.id??n.deviceId, displayName:n.displayName??n.id,
     deviceFamily:n.deviceFamily??'headless', platform:n.platform??'—', connected:true
   }));
