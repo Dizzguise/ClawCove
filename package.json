@@ -1,10 +1,10 @@
 {
-  "name": "clawville",
+  "name": "clawcove",
   "version": "0.1.0",
   "description": "🦞 Live underwater city visualizer for your OpenClaw agent system",
   "main": "server.js",
   "bin": {
-    "clawville": "./server.js"
+    "clawcove": "./server.js"
   },
   "scripts": {
     "start": "node server.js",
