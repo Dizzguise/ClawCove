@@ -1,8 +1,8 @@
-# 🦞 ClawCove
+# ⚡ The Grid (formerly ClawCove)
 
-> A live underwater city visualizer for your [OpenClaw](https://openclaw.ai) agent system.
+> A digital AI operations headquarters interface, evolving from ClawCove into **The Grid** by CK Ops.
 
-> **Project direction update:** ClawCove is now evolving into a lightweight multi-agent platform with first-class visual orchestration. See `docs/PLATFORM_VISION.md`.
+> **Project direction update:** The Grid is a lightweight multi-agent operations platform (Python core + Node visual layer) with first-class visual orchestration. See `docs/PLATFORM_VISION.md` and `docs/THE_GRID_MASTER_PLAN.md`.
 
 Your OpenClaw agents become lobster sprites swimming through a bioluminescent coral city. Buildings represent real system components — Gateway Spire, agent grottos, cron tower, channel coral, skills reef. Everything is generated from your live gateway state and updates in real time as your agents work.
 
