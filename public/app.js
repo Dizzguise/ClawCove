@@ -28,6 +28,11 @@ let camMode       = 'follow';
 let camTarget     = null;  // agent to follow in 'follow'/'action' mode
 let lastActiveAt  = 0;     // tick of last agent activity (for action cam)
 
+// Neutral world workers (non-agent visual handlers)
+const WORLD_WORKERS = [
+  { id:'mailman', name:'Mailman', role:'dispatcher', px: 8*TILE, py: 30*TILE, color:'#ffd060', task:null, path:[] },
+];
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAP + PATHFINDING
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -102,6 +107,59 @@ function bfs(sx, sy, ex, ey) {
 }
 
 function getBEntry(b) { return [Math.floor(b.x+b.w/2), b.y+b.h]; }
+
+function routeInboundAgent(channelId) {
+  const ch = (channelId||'').toLowerCase();
+  if (ch.includes('telegram')) return AGENTS.find(a => a.id === 'telegram-updates' || /barbara/i.test(a.name));
+  if (ch.includes('discord')) return AGENTS.find(a => a.id.includes('discord'));
+  if (ch.includes('whatsapp')) return AGENTS.find(a => a.id.includes('whatsapp'));
+  return AGENTS.find(a => a.hierarchyRole === 'manager') ?? AGENTS[0];
+}
+
+function dispatchDelivery(channelId, text, toAgent) {
+  const mail = WORLD_WORKERS.find(w => w.id === 'mailman');
+  const channelsB = BUILDINGS.find(b => b.id === 'channels');
+  const homeB = toAgent ? BUILDINGS.find(b => b.id === toAgent.homeBuilding) : null;
+  if (!mail || !channelsB || !homeB) return;
+
+  const [sx, sy] = getBEntry(channelsB);
+  const [ex, ey] = getBEntry(homeB);
+  mail.px = sx * TILE; mail.py = sy * TILE;
+  mail.path = bfs(sx, sy, ex, ey);
+  mail.task = { channelId, text, toAgentId: toAgent?.id, ttl: 260 };
+}
+
+function updateWorkers() {
+  for (const w of WORLD_WORKERS) {
+    if (w.task?.ttl) w.task.ttl -= simSpeed;
+    if (w.task && w.task.ttl <= 0) w.task = null;
+    if (!w.path?.length) continue;
+    const [tx,ty] = w.path[0];
+    const tpx=tx*TILE, tpy=ty*TILE;
+    const dx=tpx-w.px, dy=tpy-w.py;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    const spd=1.4*simSpeed;
+    if (dist < spd+0.5) { w.px=tpx; w.py=tpy; w.path.shift(); }
+    else { w.px += dx/dist*spd; w.py += dy/dist*spd; }
+  }
+}
+
+function drawWorkers() {
+  for (const w of WORLD_WORKERS) {
+    const sx=w.px-camX, sy=w.py-camY;
+    if(sx<-20||sx>W+20||sy<-20||sy>H+20) continue;
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(sx,sy+2,6,3,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=w.color||'#ffd060'; ctx.fillRect(sx-5,sy-12,10,10);
+    ctx.fillStyle='#041428'; ctx.fillRect(sx-2,sy-8,4,4);
+    ctx.fillStyle='#ffd060'; ctx.font='6px "Press Start 2P",monospace'; ctx.textAlign='center';
+    ctx.fillText('MAIL', sx, sy-16);
+    if (w.task) {
+      ctx.fillStyle='rgba(0,4,16,0.9)'; ctx.fillRect(sx-26, sy-28, 52, 10);
+      ctx.fillStyle='#ffd060'; ctx.font='5px monospace';
+      ctx.fillText('delivery', sx, sy-21);
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TOOL → BUILDING ROUTING
@@ -328,6 +386,25 @@ function drawActivityRing(a) {
     ctx.fillStyle = a.color;
     ctx.beginPath(); ctx.arc(sx+ox, sy-8+oy, 5, 0, Math.PI*2); ctx.fill();
   }
+  ctx.restore();
+}
+
+function drawWorkAction(a, sx, sy) {
+  const tool = (a.activeJob?.tool || '').toLowerCase();
+  const pulse = Math.sin(tick*0.14)*0.5+0.5;
+  const icon = tool.includes('web') || tool.includes('browser') ? '🔎'
+    : tool.includes('message') || tool.includes('triage') ? '✉'
+    : tool.includes('memory') ? '🗂'
+    : tool.includes('schedule') ? '⏰'
+    : '⚙';
+  ctx.save();
+  ctx.globalAlpha = 0.7 + pulse*0.3;
+  ctx.fillStyle = 'rgba(0,4,16,0.85)';
+  ctx.fillRect(sx-10, sy-34, 20, 12);
+  ctx.fillStyle = '#ffd060';
+  ctx.font = '10px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(icon, sx, sy-25);
   ctx.restore();
 }
 
@@ -668,14 +745,26 @@ function handleGatewayEvent(event) {
   if (e === 'chat') {
     const ch = p?.channel ?? p?.from ?? 'channel';
     const text = p?.text ? p.text.slice(0,30) : null;
-    // Route to channels building
-    const channelB = BUILDINGS.find(b => b.id==='channels');
-    // Pick nearest idle agent to "receive" the message
-    const receiver = AGENTS.find(a=>a.id==='main') ?? AGENTS[0];
+
+    // Transport layer: mailman carries inbound packet.
+    const receiver = routeInboundAgent(ch);
+    dispatchDelivery(ch, text, receiver);
+
+    // Decision layer: assigned agent triages and then delegates/execut es.
     if (receiver) {
-      receiver.activeJob = { buildingId:'channels', tool:'send_message', label:`${ch}: msg in` };
-      agentSpeak(receiver, `📡 ${ch}${text?' : '+text.slice(0,14):''}`, 160);
+      receiver.activeJob = { buildingId: receiver.homeBuilding, tool:'triage', label:`triage: ${ch}` };
+      agentSpeak(receiver, `📨 ${ch}${text?' : '+text.slice(0,14):''}`, 180);
+
+      // realistic delegation: Barbara routes research to Ace
+      const wantsResearch = /search|find|look up|research|web/i.test(text||'');
+      const ace = AGENTS.find(a => a.id === 'web-scout' || /ace/i.test(a.name));
+      if (receiver.id === 'telegram-updates' && wantsResearch && ace) {
+        addCollabLink(receiver.id, ace.id, 'research', '#ffd060');
+        startMeeting(receiver.id, ace.id, 'research');
+        ace.activeJob = { buildingId:'browser', tool:'web_search', label:'web research' };
+      }
     }
+
     addLog(`Chat [${ch}]: ${text||'message'}`, 'live');
     cityEvent('💬', `${ch}: ${text||'new message'}`, '#00e5ff');
   }
@@ -894,6 +983,7 @@ function drawAgent(a) {
 
   // Activity rings (working + depth > 0)
   if ((isWk||a.glowing) && a.activityDepth > 0) drawActivityRing(a);
+  if (isWk && a.activeJob) drawWorkAction(a, sx, sy);
 
   // Glow halo
   if (a.glowing||isWk||isMt) {
@@ -1223,6 +1313,7 @@ function loop(){
   updateSpeechLines();
   updateCollabLinks();
   updateMeetings();
+  updateWorkers();
   maybeChatter();
   updateCamera();
 
@@ -1238,6 +1329,7 @@ function loop(){
   drawCollabLinks();
   drawMeetings();
   BUILDINGS.forEach(drawBuilding);
+  drawWorkers();
   AGENTS.slice().sort((a,b)=>a.py-b.py).forEach(drawAgent);
   drawAllSpeech();
   drawPinnedThoughts();
