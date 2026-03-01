@@ -678,8 +678,9 @@ function handleGatewayEvent(event) {
 
   if (e === 'agent') {
     const status  = p?.status;
-    const agentId = agentIdFromPayload(p) ?? 'main';
+    const agentId = agentIdFromPayload(p);
     const runId   = p?.runId;
+    if (!agentId) return;
     const tool    = p?.tool ?? p?.toolName ?? null;
     const agent   = AGENTS.find(a => a.id === agentId)
                  ?? AGENTS.find(a => a.id === 'main');
@@ -828,8 +829,11 @@ function handleGatewayEvent(event) {
 
 function handleAgentActivity(msg) {
   // Normalise and re-route through main handler
+  // Do not default to main when agent identity is unknown.
+  if (!msg?.agentId && !msg?.sessionKey) return;
   handleGatewayEvent({ event: 'agent', payload: {
-    agentId: msg.agentId ?? 'main',
+    agentId: msg.agentId,
+    sessionKey: msg.sessionKey,
     status:  msg.status,
     tool:    msg.tool,
     runId:   msg.runId,
