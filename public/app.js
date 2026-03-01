@@ -116,6 +116,15 @@ function routeInboundAgent(channelId) {
   return AGENTS.find(a => a.hierarchyRole === 'manager') ?? AGENTS[0];
 }
 
+function agentIdFromPayload(p) {
+  if (!p) return null;
+  if (p.agentId) return p.agentId;
+  if (p.agent) return p.agent;
+  const sk = p.sessionKey || p.session || p.targetSessionKey || '';
+  const m = /^agent:([^:]+):/.exec(String(sk));
+  return m?.[1] ?? null;
+}
+
 function dispatchDelivery(channelId, text, toAgent) {
   const mail = WORLD_WORKERS.find(w => w.id === 'mailman');
   const channelsB = BUILDINGS.find(b => b.id === 'channels');
@@ -662,7 +671,7 @@ function handleGatewayEvent(event) {
 
   if (e === 'agent') {
     const status  = p?.status;
-    const agentId = p?.agentId ?? p?.agent ?? 'main';
+    const agentId = agentIdFromPayload(p) ?? 'main';
     const runId   = p?.runId;
     const tool    = p?.tool ?? p?.toolName ?? null;
     const agent   = AGENTS.find(a => a.id === agentId)
