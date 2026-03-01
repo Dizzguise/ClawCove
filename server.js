@@ -437,11 +437,11 @@ function demoWorld() {
         x:35,y:19,w:8,h:10,accent:'#00e5ff',wall:'#041428',roof:'#021020',
         details:{url:'ws://127.0.0.1:18789',uptime:'offline',sessions:0,status:'offline'},
         activities:['Demo mode — connect OpenClaw'],shape:'tower'},
-      { id:'agent-main',kind:'agent',agentId:'main',name:"Molty's Grotto",label:'MAIN GROTTO',
+      { id:'agent-main',kind:'agent',agentId:'main',name:'main Command',label:'MAIN COMMAND',
         x:15,y:13,w:9,h:10,accent:'#ff6b35',wall:'#180a06',roof:'#0e0503',
-        details:{model:'claude-opus-4-6',tier:'large'},activities:['Waiting…']},
+        details:{model:'openai-codex/gpt-5.3-codex',tier:'large'},activities:['Waiting…']},
     ],
-    agents:[{ id:'main',name:'Molty',role:'Main Agent',homeBuilding:'agent-main',
-      color:'#ff6b35',colorHue:18,model:'claude-opus-4-6',tier:'large',startX:20,startY:22}],
+    agents:[{ id:'main',name:'main',role:'Manager',homeBuilding:'agent-main',
+      color:'#ff6b35',colorHue:18,model:'openai-codex/gpt-5.3-codex',tier:'large',startX:20,startY:22}],
     meta:{agentCount:1,sessionCount:0,cronJobCount:0,channelCount:0,skillCount:0,nodeCount:0,health:'offline'} };
 }
