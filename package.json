@@ -1,0 +1,27 @@
+{
+  "name": "clawville",
+  "version": "0.1.0",
+  "description": "🦞 Live underwater city visualizer for your OpenClaw agent system",
+  "main": "server.js",
+  "bin": {
+    "clawville": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --dev"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "openclaw",
+    "ai",
+    "agent",
+    "visualization"
+  ],
+  "license": "MIT",
+  "type": "module"
+}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦞 Clawville</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+canvas{display:block;width:100%;height:100%}
+#ui{position:fixed;inset:0;pointer-events:none}
+#topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:rgba(0,6,18,0.94);border-bottom:2px solid #0a3050;pointer-events:all}
+#logo{font-family:'Press Start 2P',monospace;font-size:11px;color:#00e5ff;text-shadow:0 0 12px rgba(0,229,255,0.8)}
+#sub{font-family:'Press Start 2P',monospace;font-size:6px;color:#0a4060;margin-top:3px}
+#clockel{font-family:'Press Start 2P',monospace;font-size:9px;color:#7ef7ff;text-align:right;line-height:1.6}
+.spdbtn{font-family:'Press Start 2P',monospace;font-size:7px;background:rgba(0,15,35,0.9);border:1px solid #0a3a5a;color:#2a7a9a;padding:4px 8px;cursor:pointer;pointer-events:all}
+.spdbtn.active,.spdbtn:hover{background:#00e5ff;color:#000;border-color:#00e5ff}
+#status-pill{font-family:'Press Start 2P',monospace;font-size:6px;padding:3px 8px;border:1px solid;pointer-events:none}
+#status-pill.live{color:#00ff88;border-color:#00ff88}
+#status-pill.demo{color:#ffd060;border-color:#ffd060}
+#status-pill.offline{color:#ff4444;border-color:#ff4444}
+#status-pill.connecting{color:#aaaaaa;border-color:#444}
+#infopanel{position:fixed;right:0;top:46px;width:240px;background:rgba(0,6,18,0.97);border-left:2px solid #0a3050;height:calc(100% - 46px);padding:12px 10px;overflow-y:auto;font-family:'Press Start 2P',monospace;pointer-events:all;display:none}
+#infopanel.show{display:block}
+.ip-title{font-size:9px;color:#00e5ff;margin-bottom:10px;line-height:1.6}
+.ip-row{font-size:6px;color:#0a5070;margin-bottom:5px;line-height:1.8}
+.ip-row span{color:#7ef7ff}
+.ip-section{font-size:6px;color:#0a3050;margin:10px 0 5px;border-bottom:1px solid #040e1e;padding-bottom:3px}
+.ip-mem{font-size:6px;color:#00c090;line-height:2;margin-bottom:2px}
+#closebtn{font-family:'Press Start 2P',monospace;font-size:6px;background:rgba(0,15,35,0.9);border:1px solid #0a3050;color:#0a5070;padding:4px 8px;cursor:pointer;margin-bottom:10px;pointer-events:all}
+#eventlog{position:fixed;left:8px;top:54px;width:240px;background:rgba(0,6,18,0.88);border:1px solid #0a3050;padding:8px;font-family:'Press Start 2P',monospace;font-size:6px;pointer-events:none;max-height:160px;overflow:hidden}
+#eventlog-title{color:#0a4060;margin-bottom:5px}
+.log-entry{color:#1a7050;line-height:1.9;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.log-entry.new{color:#00e5a0}
+.log-entry.warn{color:#ffd060}
+.log-entry.live{color:#00ccff}
+#legend{position:fixed;left:8px;bottom:8px;background:rgba(0,6,18,0.88);border:1px solid #0a3050;padding:8px 10px;font-family:'Press Start 2P',monospace;font-size:6px;color:#1a6a8a;pointer-events:none}
+.lr{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.ld{width:8px;height:8px;flex-shrink:0;border-radius:1px}
+#speech{position:fixed;display:none;background:#000e1c;border:2px solid #00e5ff;padding:8px 12px;font-family:'Press Start 2P',monospace;font-size:7px;color:#7ef7ff;line-height:1.7;max-width:240px;pointer-events:none;z-index:100;box-shadow:0 0 20px rgba(0,229,255,0.35)}
+#minimap{position:fixed;right:8px;bottom:8px;background:rgba(0,6,18,0.92);border:1px solid #0a3050;pointer-events:none}
+#mmcanvas{display:block}
+#splash{position:fixed;inset:0;background:rgba(0,6,18,0.96);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;z-index:999}
+#splash.hidden{display:none}
+#splash-title{font-size:18px;color:#00e5ff;text-shadow:0 0 20px rgba(0,229,255,0.8);margin-bottom:16px}
+#splash-msg{font-size:8px;color:#1a6a8a;line-height:2.2;text-align:center;max-width:400px}
+#splash-sub{font-size:7px;color:#0a4060;margin-top:12px;line-height:2}
+</style>
+</head>
+<body>
+<div id="splash">
+  <div id="splash-title">🦞 CLAWVILLE</div>
+  <div id="splash-msg" id="splash-msg">Connecting to OpenClaw gateway…</div>
+  <div id="splash-sub"></div>
+</div>
+
+<div id="ui">
+  <div id="topbar">
+    <div>
+      <div id="logo">🦞 CLAWVILLE</div>
+      <div id="sub">Live OpenClaw City</div>
+    </div>
+    <div style="display:flex;gap:5px;align-items:center">
+      <div id="status-pill" class="connecting">CONNECTING</div>
+      <span style="font-family:'Press Start 2P',monospace;font-size:6px;color:#0a3050;margin-left:8px">SPEED:</span>
+      <button class="spdbtn" onclick="setSpeed(0.5)">½x</button>
+      <button class="spdbtn active" onclick="setSpeed(1)">1x</button>
+      <button class="spdbtn" onclick="setSpeed(2)">2x</button>
+      <button class="spdbtn" onclick="setSpeed(4)">4x</button>
+    </div>
+    <div id="clockel">—<br><span style="font-size:6px;color:#0a3050">CLAWVILLE</span></div>
+  </div>
+  <div id="eventlog">
+    <div id="eventlog-title">◈ LIVE EVENTS</div>
+    <div id="log-entries"></div>
+  </div>
+  <div id="infopanel">
+    <button id="closebtn" onclick="document.getElementById('infopanel').classList.remove('show')">✕ CLOSE</button>
+    <div id="ipc"></div>
+  </div>
+  <div id="legend">
+    <div style="color:#00e5ff;margin-bottom:6px;font-size:7px">CLAWVILLE</div>
+    <div id="legend-agents"></div>
+    <div style="margin-top:6px;color:#0a3050">drag · click · inspect</div>
+  </div>
+  <div id="minimap"><canvas id="mmcanvas" width="120" height="84"></canvas></div>
+</div>
+
+<canvas id="canvas"></canvas>
+<div id="speech"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

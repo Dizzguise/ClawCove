@@ -12,3 +12,7 @@ Thumbs.db
 *.log
 *.tmp
 .cache/
+
+# Dependencies
+node_modules/
+venv/
