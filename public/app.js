@@ -33,6 +33,10 @@ const WORLD_WORKERS = [
   { id:'mailman', name:'Mailman', role:'dispatcher', px: 8*TILE, py: 30*TILE, color:'#ffd060', task:null, path:[] },
 ];
 
+// Visual routing hint: when inbound channel traffic is assigned to a specialist,
+// temporarily prefer that specialist over main for ambiguous near-term activity.
+let INBOUND_HINT = null;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAP + PATHFINDING
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -678,11 +682,20 @@ function handleGatewayEvent(event) {
 
   if (e === 'agent') {
     const status  = p?.status;
-    const agentId = agentIdFromPayload(p);
+    const resolvedAgentId = agentIdFromPayload(p);
     const runId   = p?.runId;
-    if (!agentId) return;
     const tool    = p?.tool ?? p?.toolName ?? null;
-    const agent   = AGENTS.find(a => a.id === agentId)
+
+    // If runtime says main right after an inbound specialist-routed chat,
+    // treat this as visualization handoff to the hinted specialist.
+    const hintedActive = INBOUND_HINT && tick < INBOUND_HINT.until;
+    const visualAgentId = (
+      hintedActive && resolvedAgentId === 'main' &&
+      (status === 'started' || status === 'running' || status === 'tool_start')
+    ) ? INBOUND_HINT.agentId : resolvedAgentId;
+
+    if (!visualAgentId) return;
+    const agent   = AGENTS.find(a => a.id === visualAgentId)
                  ?? AGENTS.find(a => a.id === 'main');
 
     if (!agent) return;
@@ -737,9 +750,9 @@ function handleGatewayEvent(event) {
     // Detect delegation: if the gateway signals a sub-agent was called
     if (p?.calledBy || p?.parentAgent) {
       const managerId = p.calledBy ?? p.parentAgent;
-      addCollabLink(managerId, agentId, tool || 'task', '#ffd060');
+      addCollabLink(managerId, visualAgentId, tool || 'task', '#ffd060');
       cityEvent('📋', `${managerId} → ${agent.name}: delegated`, '#ffd060');
-      startMeeting(managerId, agentId, (tool||'task').slice(0,12));
+      startMeeting(managerId, visualAgentId, (tool||'task').slice(0,12));
     }
   }
 
@@ -767,7 +780,11 @@ function handleGatewayEvent(event) {
     const receiver = routeInboundAgent(ch, p);
     dispatchDelivery(ch, text, receiver);
 
-    // Decision layer: assigned agent triages and then delegates/execut es.
+    if (receiver) {
+      INBOUND_HINT = { agentId: receiver.id, channel: ch, until: tick + 320 };
+    }
+
+    // Decision layer: assigned agent triages and then delegates/executes.
     if (receiver) {
       receiver.activeJob = { buildingId: receiver.homeBuilding, tool:'triage', label:`triage: ${ch}` };
       agentSpeak(receiver, `📨 ${ch}${text?' : '+text.slice(0,14):''}`, 180);
