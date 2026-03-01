@@ -2,6 +2,8 @@
 
 > A live underwater city visualizer for your [OpenClaw](https://openclaw.ai) agent system.
 
+> **Project direction update:** ClawCove is now evolving into a lightweight multi-agent platform with first-class visual orchestration. See `docs/PLATFORM_VISION.md`.
+
 Your OpenClaw agents become lobster sprites swimming through a bioluminescent coral city. Buildings represent real system components — Gateway Spire, agent grottos, cron tower, channel coral, skills reef. Everything is generated from your live gateway state and updates in real time as your agents work.
 
 ![ClawCove screenshot](https://raw.githubusercontent.com/your-org/clawcove/main/docs/screenshot.png)
